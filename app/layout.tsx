@@ -22,7 +22,7 @@ export default function RootLayout({
     <html
       lang="zh-CN"
       suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", outfit.variable, ralewayHeading.variable)}
+      className={cn("antialiased overflow-hidden", fontMono.variable, "font-sans", outfit.variable, ralewayHeading.variable)}
     >
       <body>
         <ThemeProvider>{children}</ThemeProvider>
