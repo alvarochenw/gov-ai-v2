@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
+import { ChevronDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppState, useAppDispatch } from "@/hooks/use-app-state"
 import { Sidebar } from "@/components/sidebar"
-import { Scrim } from "@/components/scrim"
 import { HeroSection } from "@/components/hero-section"
 import { Composer } from "@/components/composer"
 import { setPendingChatPrompt } from "@/lib/pending-prompt"
@@ -26,25 +27,175 @@ import { tools } from "@/data/tools"
 import { experts } from "@/data/experts"
 import type { ModeName } from "@/types"
 
+/* ------------------------------------------------------------------ */
+/*  Mobile horizontal nav                                             */
+/* ------------------------------------------------------------------ */
+
+const writingSubItems = [
+  { view: "write-quick", label: "快速写作" },
+  { view: "write-template", label: "模板写作" },
+  { view: "write-style", label: "风格写作" },
+  { view: "write-ref", label: "以文写文" },
+]
+
+function MobileNav() {
+  const state = useAppState()
+  const dispatch = useAppDispatch()
+  const [writingExpanded, setWritingExpanded] = useState(false)
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
+  const navRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+
+  // Position dropdown relative to the trigger button
+  const updatePosition = useCallback(() => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setDropdownStyle({
+        position: "fixed",
+        top: rect.bottom + 8,
+        left: rect.left,
+        minWidth: 140,
+      })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (writingExpanded) {
+      updatePosition()
+      window.addEventListener("scroll", updatePosition, true)
+      window.addEventListener("resize", updatePosition)
+      return () => {
+        window.removeEventListener("scroll", updatePosition, true)
+        window.removeEventListener("resize", updatePosition)
+      }
+    }
+  }, [writingExpanded, updatePosition])
+
+  // Close writing dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) {
+        setWritingExpanded(false)
+      }
+    }
+    if (writingExpanded) {
+      document.addEventListener("mousedown", handleClick)
+      return () => document.removeEventListener("mousedown", handleClick)
+    }
+  }, [writingExpanded])
+
+  const isWritingActive = state.view.startsWith("write-") || state.view === "chat"
+
+  const isActive = (view: string) => {
+    if (view === "home") return state.view === "home"
+    if (view === "tools")
+      return ["tools", "tool-proofread", "proofread-editor", "tool-typeset"].includes(state.view)
+    return state.view === view
+  }
+
+  const handleNav = (view: string) => {
+    dispatch({ type: "SET_VIEW", view: view as typeof state.view })
+    setWritingExpanded(false)
+  }
+
+  const navItems = [
+    { label: "新建", view: "home" },
+    // writing is special — expandable
+    { label: "工具", view: "tools" },
+    { label: "知识", view: "knowledge" },
+    { label: "专家", view: "experts" },
+  ]
+
+  return (
+    <nav
+      ref={navRef}
+      className="hidden max-[800px]:flex items-center gap-1 px-3 h-11 flex-none border-b border-line bg-white/80 backdrop-blur-[12px]"
+    >
+      {navItems.map((item) => (
+        <button
+          key={item.view}
+          type="button"
+          onClick={() => handleNav(item.view)}
+          className={cn(
+            "relative px-3 py-1.5 rounded-lg text-[13px] font-[620] cursor-pointer",
+            "transition-[background,color] duration-150",
+            isActive(item.view)
+              ? "text-accent-deep bg-accent-soft"
+              : "text-muted-text bg-transparent hover:bg-white/60"
+          )}
+        >
+          {item.label}
+        </button>
+      ))}
+
+      {/* Writing dropdown */}
+      <div className="relative">
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setWritingExpanded(!writingExpanded)}
+          className={cn(
+            "inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-[13px] font-[620] cursor-pointer",
+            "transition-[background,color] duration-150",
+            isWritingActive
+              ? "text-accent-deep bg-accent-soft"
+              : "text-muted-text bg-transparent hover:bg-white/60"
+          )}
+        >
+          公文创作
+          <ChevronDown
+            className={cn(
+              "w-3.5 h-3.5 transition-transform duration-150",
+              writingExpanded && "rotate-180"
+            )}
+          />
+        </button>
+
+        {/* Dropdown — rendered via Portal to escape overflow-hidden */}
+        {writingExpanded && createPortal(
+          <div
+            style={dropdownStyle}
+            className={cn(
+              "py-1.5",
+              "bg-white/95 backdrop-blur-[12px] border border-line rounded-xl",
+              "shadow-[0_8px_24px_rgba(74,49,60,0.10)] z-[9999]"
+            )}
+          >
+            {writingSubItems.map((item) => (
+              <button
+                key={item.view}
+                type="button"
+                onClick={() => handleNav(item.view)}
+                className={cn(
+                  "w-full text-left px-4 py-2 text-[13px] font-[620] cursor-pointer",
+                  "transition-[background,color] duration-150",
+                  state.view === item.view
+                    ? "text-accent-deep bg-accent-soft"
+                    : "text-muted-text hover:bg-white/60"
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
+      </div>
+    </nav>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/*  App shell                                                         */
+/* ------------------------------------------------------------------ */
+
 export function AppShell() {
   const state = useAppState()
   const dispatch = useAppDispatch()
-  const { view, sidebarCollapsed, mobileMenuOpen, notice } = state
+  const { view, sidebarCollapsed, notice } = state
   const [pendingPrompt, setPendingPrompt] = useState("")
 
-  // Close mobile menu on Escape
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        dispatch({ type: "SET_MOBILE_MENU", open: false })
-      }
-    }
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [dispatch])
-
   const handleSend = (prompt: string) => {
-    // Store the prompt so ChatView can pick it up
     setPendingChatPrompt(prompt)
     dispatch({ type: "SET_CHAT_MODE", mode: "快速写作" })
     dispatch({ type: "CLEAR_CHAT" })
@@ -265,10 +416,6 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh">
-      <Scrim
-        open={mobileMenuOpen}
-        onClose={() => dispatch({ type: "SET_MOBILE_MENU", open: false })}
-      />
       <Sidebar />
 
       <section
@@ -280,6 +427,9 @@ export function AppShell() {
             : "ml-[276px] max-[800px]:ml-0"
         )}
       >
+        {/* Mobile horizontal nav — only visible on narrow screens */}
+        <MobileNav />
+
         <main
           className={cn(
             "flex-1 min-h-0 overflow-auto",

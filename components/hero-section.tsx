@@ -22,10 +22,17 @@ export function HeroSection({ view, mode }: HeroSectionProps) {
           "max-[500px]:text-[29px]"
         )}
       >
-        {isWrite ? copy.title : "全能助手，"}
-        <span className="text-primary">
-          {isWrite ? "让规范成文更简单" : "一步开启高效公文写作"}
-        </span>
+        {isWrite ? (
+          <>
+            <span className="inline-block">{copy.title}</span>
+            <span className="text-primary inline-block">让规范成文更简单</span>
+          </>
+        ) : (
+          <>
+            <span className="inline-block">全能助手，</span>
+            <span className="text-primary inline-block">一步开启高效公文写作</span>
+          </>
+        )}
       </h1>
     </div>
   )
