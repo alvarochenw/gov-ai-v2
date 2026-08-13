@@ -10,9 +10,12 @@ import {
   ChevronDown,
   Check,
   Pin,
+  Paperclip,
+  X,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { ContextChip } from "@/components/context-chip"
+import type { AttachedFile } from "@/components/chat-input"
 import { modes } from "@/data/modes"
 import { experts } from "@/data/experts"
 import type { ModeName } from "@/types"
@@ -45,7 +48,7 @@ interface ComposerProps {
   expert: string
   defaultExpert: string
   pinnedExperts: string[]
-  onSend: (prompt: string) => void
+  onSend: (prompt: string, file?: AttachedFile) => void
   onExpertChange: (name: string, prompt: string) => void
   initialPrompt?: string
   onPromptConsumed?: () => void
@@ -64,11 +67,13 @@ export function Composer({
   const [promptText, setPromptText] = useState("")
   const [deepThinking, setDeepThinking] = useState(false)
   const [expertDropdownOpen, setExpertDropdownOpen] = useState(false)
+  const [attachedFile, setAttachedFile] = useState<AttachedFile | null>(null)
   // Store position as ref so we can set it synchronously on click, no extra render
   const [dropdownPos, setDropdownPos] = useState<{ top?: number; bottom?: number; left: number; width: number } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const currentMode = modes.find((m) => m.name === mode)
   const placeholder = currentMode?.placeholder || "请输入写作要求"
@@ -163,12 +168,26 @@ export function Composer({
     }
   }, [expertDropdownOpen, calcPosition])
 
-  const hasContent = promptText.trim().length > 0
+  const hasContent = promptText.trim().length > 0 || !!attachedFile
 
   const handleSend = () => {
     const value = promptText.trim()
-    if (!value) return
-    onSend(value)
+    if (!value && !attachedFile) return
+    onSend(value, attachedFile || undefined)
+    setPromptText("")
+    setAttachedFile(null)
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const content = typeof reader.result === "string" ? reader.result : ""
+      setAttachedFile({ name: file.name, content })
+    }
+    reader.readAsText(file)
+    e.target.value = ""
   }
 
   const handleExpertSelect = (name: string, prompt: string) => {
@@ -220,6 +239,23 @@ export function Composer({
           ))}
         </div>
 
+        {/* Attached file indicator */}
+        {attachedFile && (
+          <div className="flex items-center gap-2 px-[22px] pb-[10px]">
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-accent-soft text-accent-deep text-xs font-medium">
+              <Paperclip className="w-3 h-3" />
+              <span className="truncate max-w-[200px]">{attachedFile.name}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAttachedFile(null)}
+              className="p-0.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Toolbar */}
         <div
           className={cn(
@@ -229,20 +265,27 @@ export function Composer({
           )}
         >
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".txt,.csv,.json,.md,.text"
+              onChange={handleFileChange}
+            />
             <button
               type="button"
-              onClick={() => {
-                // Demo: simulate attachment
-              }}
+              onClick={() => fileInputRef.current?.click()}
               className={cn(
                 "min-h-[39px] border border-line rounded-[12px] px-[13px] py-2 cursor-pointer",
                 "bg-white/88 text-[12px] font-[680] inline-flex items-center gap-[7px]",
                 "hover:border-[rgba(200,60,78,0.24)] hover:bg-accent-faint hover:shadow-[0_8px_20px_rgba(84,56,68,0.06)]",
-                "transition-[background,border-color,box-shadow] duration-150"
+                "transition-[background,border-color,box-shadow] duration-150",
+                attachedFile && "border-[rgba(200,60,78,0.36)] bg-accent-faint"
               )}
             >
               <Upload className="w-[18px] h-[18px]" />
-              添加参考材料
+              {attachedFile ? "已添加" : "添加参考材料"}
             </button>
 
             {/* Expert trigger button */}

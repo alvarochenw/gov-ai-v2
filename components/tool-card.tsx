@@ -39,7 +39,7 @@ export function ToolCard({
         <span className="w-10 h-10 grid place-items-center rounded-[13px] text-accent-deep bg-accent-soft flex-none relative z-1">
           <Icon className="w-[21px] h-[21px]" />
         </span>
-        <b className="text-sm relative z-1">{name}</b>
+        <b className="text-sm whitespace-nowrap relative z-1">{name}</b>
       </button>
     )
   }

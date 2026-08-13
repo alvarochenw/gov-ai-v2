@@ -9,9 +9,17 @@ import type { ChatMessage as ChatMessageType, ToolCallInfo } from "@/types"
 
 interface ChatMessageProps {
   message: ChatMessageType
+  /** Whether the AI is still actively streaming this message */
+  isStreaming?: boolean
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+// Strip <script> tags from markdown to avoid React warnings
+// React never executes scripts during client rendering
+const markdownComponents = {
+  script: () => null,
+}
+
+export function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const { role, content, type, options } = message
   const isAssistant = role === "assistant"
 
@@ -53,7 +61,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {/* Thinking & Tool Calls — outside the bubble */}
           {isAssistant && (message.thinking || (message.toolCalls && message.toolCalls.length > 0)) && (
             <div className="pl-1 space-y-1.5">
-              {message.thinking && <ThinkingBlock text={message.thinking} />}
+              {message.thinking && <ThinkingBlock text={message.thinking} isStreaming={isStreaming && !!message.thinking} />}
               {message.toolCalls?.map((tc) => (
                 <ToolCallBlock key={tc.id} tool={tc} />
               ))}
@@ -70,7 +78,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           >
             <div className="prose-chat">
               {isAssistant ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
               ) : (
                 content
               )}
@@ -144,7 +152,7 @@ function DocumentMessage({ content }: { content: string }) {
                 content
               ) : (
                 <div className="prose-chat">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</ReactMarkdown>
                 </div>
               )}
             </div>
@@ -183,27 +191,38 @@ function DocumentMessage({ content }: { content: string }) {
   )
 }
 
-/* ── Thinking Block — shown outside the bubble ── */
+/* ── Thinking Block — live while streaming ── */
 
-function ThinkingBlock({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false)
+interface ThinkingBlockProps {
+  text: string
+  /** true while the AI is still actively producing content */
+  isStreaming?: boolean
+}
+
+function ThinkingBlock({ text, isStreaming }: ThinkingBlockProps) {
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
 
   if (!text.trim()) return null
 
+  // Auto-expand while streaming, auto-collapse when done (unless user manually toggled)
+  const expanded = userToggled !== null ? userToggled : !!isStreaming
+
   return (
     <div className="flex items-start gap-1.5 text-[11px] leading-relaxed">
-      <Brain className="w-3 h-3 text-[#b0a3a8] flex-none mt-0.5" />
+      <Brain className={cn("w-3 h-3 flex-none mt-0.5", isStreaming ? "text-[#d85061] animate-pulse" : "text-[#b0a3a8]")} />
       <div className="min-w-0">
         <button
           type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="text-[#9a8d92] hover:text-[#6b5c52] cursor-pointer border-0 bg-transparent p-0 font-[600] text-[11px] transition-colors"
+          onClick={() => setUserToggled(!expanded)}
+          className="text-[#9a8d92] hover:text-[#6b5c52] cursor-pointer border-0 bg-transparent p-0 font-[600] text-[11px] transition-colors inline-flex items-center gap-1"
         >
+          {isStreaming && <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#d85061] animate-pulse" />}
           思考过程 {expanded ? "▾" : "▸"}
         </button>
         {expanded && (
           <p className="mt-1 text-[#9a8d92] whitespace-pre-wrap break-words">
             {text}
+            {isStreaming && <span className="inline-block w-[2px] h-[11px] bg-[#d85061] animate-pulse ml-0.5 align-middle" />}
           </p>
         )}
       </div>
@@ -211,34 +230,39 @@ function ThinkingBlock({ text }: { text: string }) {
   )
 }
 
-/* ── Tool Call Block — shown outside the bubble ── */
+/* ── Tool Call Block — live while running ── */
 
 function ToolCallBlock({ tool }: { tool: ToolCallInfo }) {
-  const [expanded, setExpanded] = useState(false)
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
+  const isRunning = tool.status === "running"
 
-  const statusIcon = tool.status === "completed"
-    ? "✓"
-    : tool.status === "error"
-      ? "✗"
-      : "⋯"
-
-  const statusColor = tool.status === "completed"
-    ? "text-[#6b9a6b]"
-    : tool.status === "error"
-      ? "text-[#c2384a]"
-      : "text-[#b0a3a8]"
+  // Auto-expand while running, auto-collapse when done (unless user manually toggled)
+  const expanded = userToggled !== null ? userToggled : isRunning
 
   return (
     <div className="flex items-start gap-1.5 text-[11px] leading-relaxed">
-      <Wrench className="w-3 h-3 text-[#b0a3a8] flex-none mt-0.5" />
+      <Wrench className={cn("w-3 h-3 flex-none mt-0.5", isRunning ? "text-[#d85061] animate-pulse" : "text-[#b0a3a8]")} />
       <div className="min-w-0">
         <button
           type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="text-[#9a8d92] hover:text-[#6b5c52] cursor-pointer border-0 bg-transparent p-0 font-[600] text-[11px] transition-colors inline-flex items-center gap-1"
+          onClick={() => setUserToggled(!expanded)}
+          className={cn(
+            "cursor-pointer border-0 bg-transparent p-0 font-[600] text-[11px] transition-colors inline-flex items-center gap-1",
+            isRunning ? "text-[#d85061]" : "text-[#9a8d92] hover:text-[#6b5c52]"
+          )}
         >
-          <span className={statusColor}>{statusIcon}</span>
-          调用 {tool.toolName} {expanded ? "▾" : "▸"}
+          {isRunning ? (
+            <span className="inline-flex items-center gap-[3px]">
+              <span className="w-1 h-1 rounded-full bg-[#d85061] animate-bounce" style={{ animationDelay: "0ms" }} />
+              <span className="w-1 h-1 rounded-full bg-[#d85061] animate-bounce" style={{ animationDelay: "150ms" }} />
+              <span className="w-1 h-1 rounded-full bg-[#d85061] animate-bounce" style={{ animationDelay: "300ms" }} />
+            </span>
+          ) : tool.status === "completed" ? (
+            <span className="text-[#6b9a6b]">✓</span>
+          ) : (
+            <span className="text-[#c2384a]">✗</span>
+          )}
+          {isRunning ? "正在执行" : "调用"} {tool.toolName} {expanded ? "▾" : "▸"}
         </button>
         {expanded && (
           <div className="mt-1 space-y-0.5">
@@ -250,6 +274,11 @@ function ToolCallBlock({ tool }: { tool: ToolCallInfo }) {
             {tool.result && (
               <p className="text-[#9a8d92] break-all">
                 <span className="font-[600]">结果：</span>{tool.result}
+              </p>
+            )}
+            {isRunning && !tool.result && (
+              <p className="text-[#b0a3a8] italic">
+                执行中...
               </p>
             )}
           </div>

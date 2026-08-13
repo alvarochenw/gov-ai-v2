@@ -31,12 +31,21 @@ export interface WritingTool {
   prompt: string
 }
 
+export type ExpertBackendType = "agent" | "workflow"
+
+export interface ExpertBackendConfig {
+  type: ExpertBackendType
+  /** workflow 专属：app_id */
+  appId?: string
+}
+
 export interface Expert {
   name: string
   specialty: string
   description: string
   icon: LucideIcon
   prompt: string
+  backend?: ExpertBackendConfig
 }
 
 export interface ToolCallInfo {

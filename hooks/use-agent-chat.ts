@@ -11,7 +11,7 @@ interface UseAgentChatReturn {
   messages: ChatMessage[]
   isStreaming: boolean
   sessionId: string | null
-  sendMessage: (text: string) => void
+  sendMessage: (text: string, _file?: unknown) => void
   clearChat: () => void
 }
 

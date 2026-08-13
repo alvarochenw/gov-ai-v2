@@ -9,6 +9,7 @@ import { Sidebar } from "@/components/sidebar"
 import { HeroSection } from "@/components/hero-section"
 import { Composer } from "@/components/composer"
 import { setPendingChatPrompt } from "@/lib/pending-prompt"
+import type { AttachedFile } from "@/components/chat-input"
 import { ModeCard } from "@/components/mode-card"
 import { ToolCard } from "@/components/tool-card"
 import { SessionListView } from "@/components/session-list-view"
@@ -44,6 +45,7 @@ function MobileNav() {
   const [writingExpanded, setWritingExpanded] = useState(false)
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
   const navRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
 
   // Position dropdown relative to the trigger button
@@ -54,7 +56,7 @@ function MobileNav() {
         position: "fixed",
         top: rect.bottom + 8,
         left: rect.left,
-        minWidth: 140,
+        width: Math.min(rect.width + 32, 160),
       })
     }
   }, [])
@@ -71,17 +73,31 @@ function MobileNav() {
     }
   }, [writingExpanded, updatePosition])
 
-  // Close writing dropdown on outside click
+  // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (navRef.current && !navRef.current.contains(e.target as Node)) {
-        setWritingExpanded(false)
-      }
+      const target = e.target as Node
+      if (
+        navRef.current?.contains(target) ||
+        dropdownRef.current?.contains(target)
+      ) return
+      setWritingExpanded(false)
     }
     if (writingExpanded) {
       document.addEventListener("mousedown", handleClick)
       return () => document.removeEventListener("mousedown", handleClick)
     }
+  }, [writingExpanded])
+
+  // Close dropdown when viewport expands beyond mobile breakpoint
+  useEffect(() => {
+    if (!writingExpanded) return
+    const mq = window.matchMedia("(min-width: 800px)")
+    const handler = (e: MediaQueryListEvent) => {
+      if (e.matches) setWritingExpanded(false)
+    }
+    mq.addEventListener("change", handler)
+    return () => mq.removeEventListener("change", handler)
   }, [writingExpanded])
 
   const isWritingActive = state.view.startsWith("write-") || state.view === "chat"
@@ -154,6 +170,7 @@ function MobileNav() {
         {/* Dropdown — rendered via Portal to escape overflow-hidden */}
         {writingExpanded && createPortal(
           <div
+            ref={dropdownRef}
             style={dropdownStyle}
             className={cn(
               "py-1.5",
@@ -195,8 +212,8 @@ export function AppShell() {
   const { view, sidebarCollapsed, notice } = state
   const [pendingPrompt, setPendingPrompt] = useState("")
 
-  const handleSend = (prompt: string) => {
-    setPendingChatPrompt(prompt)
+  const handleSend = (prompt: string, file?: AttachedFile) => {
+    setPendingChatPrompt(prompt, file)
     dispatch({ type: "SET_CHAT_MODE", mode: "快速写作" })
     dispatch({ type: "CLEAR_CHAT" })
     dispatch({ type: "SET_VIEW", view: "chat" })
@@ -286,7 +303,7 @@ export function AppShell() {
             查看全部工具
           </button>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {tools.slice(0, 4).map((tool) => (
             <ToolCard
               key={tool.name}

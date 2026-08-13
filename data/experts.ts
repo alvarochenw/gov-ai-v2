@@ -22,6 +22,7 @@ export const experts: Expert[] = [
       "支持通知、请示、报告、函、纪要等常用文种，按正式机关口径组织内容。",
     icon: UserCheck,
     prompt: "请起草一份正式公文，事项和要求如下：",
+    backend: { type: "agent" },
   },
   {
     name: "专项汇报助手",
@@ -58,6 +59,7 @@ export const experts: Expert[] = [
     icon: BarChart3,
     prompt:
       "请分析以下政务业务数据，提炼趋势、结构、异常及原因，并形成报告表述：",
+    backend: { type: "workflow", appId: "deb7f07512de4110bb6b8dfce4e9f1bd" },
   },
   {
     name: "政策解读助手",

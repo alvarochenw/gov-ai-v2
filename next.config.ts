@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
+  allowedDevOrigins: [
+    "10.232.46.183",
+    "10.232.36.239",
+  ],
 }
 
 export default nextConfig

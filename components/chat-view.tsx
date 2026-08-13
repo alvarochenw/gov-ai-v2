@@ -5,9 +5,11 @@ import { ArrowLeft, Sparkles, ArrowDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppState, useAppDispatch } from "@/hooks/use-app-state"
 import { useAgentChat } from "@/hooks/use-agent-chat"
+import { useWorkflowChat } from "@/hooks/use-workflow-chat"
 import { ChatMessage } from "@/components/chat-message"
 import { ChatInput } from "@/components/chat-input"
 import { consumePendingChatPrompt } from "@/lib/pending-prompt"
+import { experts } from "@/data/experts"
 import type { ChatMessage as ChatMessageType, ChatSession } from "@/types"
 
 // ─── Mock step data (kept for non-公文专家 modes) ────────────────
@@ -108,19 +110,39 @@ export function ChatView() {
   const [currentStep, setCurrentStep] = useState(0)
   const [isGenerating, setIsGenerating] = useState(false)
 
+  // ── Backend mode detection ──
+  const expertConfig = experts.find((e) => e.name === expert)
+  const backendType = expertConfig?.backend?.type
+  const isAgentMode = backendType === "agent"
+  const isWorkflowMode = backendType === "workflow"
+
   // ── Agent API integration ──
-  const isAgentMode = expert === "智能公文专家"
   const agentChat = useAgentChat({
     initialGreeting: isAgentMode
       ? createMessage("assistant", "您好！我是智能公文专家，可以帮您起草各类公文。请告诉我您需要起草什么类型的公文，或者直接描述您的需求。")
       : undefined,
   })
 
+  // ── Workflow API integration ──
+  const workflowChat = useWorkflowChat({
+    appId: expertConfig?.backend?.appId ?? "",
+    initialGreeting: isWorkflowMode
+      ? createMessage("assistant", "您好！我是数据分析助手，可以帮您分析政务业务数据，提炼趋势、结构和异常。请告诉我您需要分析什么数据。")
+      : undefined,
+  })
+
+  // ── Unified active chat reference ──
+  const activeChat = isAgentMode
+    ? agentChat
+    : isWorkflowMode
+      ? workflowChat
+      : null
+
   const steps = modeSteps[chatMode] || modeSteps["快速写作"]
 
   // Initialize the first AI message on mount (mock mode only)
   useEffect(() => {
-    if (!isAgentMode && messages.length === 0 && steps.length > 0) {
+    if (!activeChat && messages.length === 0 && steps.length > 0) {
       const firstStep = steps[0]
       dispatch({
         type: "ADD_MESSAGE",
@@ -130,14 +152,14 @@ export function ChatView() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-send pending prompt from home Composer (agent mode only)
+  // Auto-send pending prompt from home Composer (real backend mode only)
   const hasAutoSentRef = useRef(false)
   useEffect(() => {
-    if (isAgentMode && !hasAutoSentRef.current) {
+    if (activeChat && !hasAutoSentRef.current) {
       hasAutoSentRef.current = true
       const pending = consumePendingChatPrompt()
-      if (pending) {
-        setTimeout(() => agentChat.sendMessage(pending), 300)
+      if (pending.text || pending.file) {
+        setTimeout(() => activeChat.sendMessage(pending.text, pending.file ?? undefined), 300)
       }
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -156,11 +178,11 @@ export function ChatView() {
     if (scrollRef.current && isAtBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [isAgentMode ? agentChat.messages : messages, agentChat.isStreaming, isGenerating])
+  }, [activeChat ? activeChat.messages : messages, activeChat?.isStreaming, isGenerating])
 
   // ── Auto-save session when messages change ──
   const prevMessageCountRef = useRef(0)
-  const displayMessages = isAgentMode ? agentChat.messages : messages
+  const displayMessages = activeChat ? activeChat.messages : messages
   useEffect(() => {
     const count = displayMessages.length
     if (count > 0 && count !== prevMessageCountRef.current) {
@@ -228,16 +250,16 @@ export function ChatView() {
   )
 
   // ── Unified send handler ──
-  const handleSend = (text: string) => {
-    if (isAgentMode) {
-      agentChat.sendMessage(text)
+  const handleSend = (text: string, file?: import("@/components/chat-input").AttachedFile) => {
+    if (activeChat) {
+      activeChat.sendMessage(text, file)
     } else {
       if (isGenerating) return
       advanceStep(text)
     }
   }
 
-  const isWorking = isAgentMode ? agentChat.isStreaming : isGenerating
+  const isWorking = activeChat ? activeChat.isStreaming : isGenerating
 
   return (
     <div className="flex flex-col h-full">
@@ -257,18 +279,31 @@ export function ChatView() {
             会话已建立
           </span>
         )}
+        {isWorkflowMode && workflowChat.executionId && (
+          <span className="text-[10px] text-[#8b7b6e] bg-[#f5ede8] px-2 py-0.5 rounded-full">
+            运行中
+          </span>
+        )}
       </div>
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto px-4 py-6 space-y-4">
-        {displayMessages.map((msg) => (
-          <ChatMessage key={msg.id} message={msg} />
-        ))}
+        {displayMessages.map((msg, idx) => {
+          // Pass isStreaming to the last assistant message while working
+          const isLastAssistant = msg.role === "assistant" && idx === displayMessages.length - 1
+          return (
+            <ChatMessage
+              key={msg.id}
+              message={msg}
+              isStreaming={isLastAssistant && isWorking}
+            />
+          )
+        })}
 
         {isWorking && (
           <div className="flex items-center gap-2 text-xs text-[#8b7b6e] pl-11">
             <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-            {isAgentMode ? "AI 正在思考..." : "正在生成公文..."}
+            {activeChat ? "AI 正在思考..." : "正在生成公文..."}
           </div>
         )}
       </div>
@@ -280,10 +315,13 @@ export function ChatView() {
       <ChatInput
         onSend={handleSend}
         disabled={isWorking}
+        fileUploadEnabled={isWorkflowMode}
         placeholder={
           isWorking
             ? "正在生成中..."
-            : "输入您的回复..."
+            : isWorkflowMode
+              ? "输入分析需求，或上传数据文件..."
+              : "输入您的回复..."
         }
       />
     </div>
