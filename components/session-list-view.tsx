@@ -110,7 +110,7 @@ export function SessionListView() {
     dispatch({ type: "DELETE_SESSION", id })
   }
 
-  const now = Date.now()
+  const [now] = useState(Date.now)
   const filteredSessions = sessions.filter((s) => {
     // Text search
     if (searchQuery.trim()) {

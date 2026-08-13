@@ -78,10 +78,16 @@ export function Composer({
   const currentMode = modes.find((m) => m.name === mode)
   const placeholder = currentMode?.placeholder || "请输入写作要求"
 
-  // Sync initialPrompt from parent
+  // Sync initialPrompt from parent (adjusting state based on props)
+  const [consumedPrompt, setConsumedPrompt] = useState("")
+  if (initialPrompt && initialPrompt !== consumedPrompt) {
+    setConsumedPrompt(initialPrompt)
+    setPromptText(initialPrompt)
+  }
+
+  // Side effects after initialPrompt is consumed
   useEffect(() => {
     if (initialPrompt) {
-      setPromptText(initialPrompt)
       onPromptConsumed?.()
       textareaRef.current?.focus()
     }
@@ -94,7 +100,6 @@ export function Composer({
     const gap = 8
     const dropdownHeight = 280 // estimated max height
     const spaceAbove = rect.top
-    const spaceBelow = window.innerHeight - rect.bottom
 
     // Only position above if there's enough room; otherwise go below
     const positionAbove = spaceAbove >= dropdownHeight

@@ -7,7 +7,7 @@ import {
   type Dispatch,
   type ReactNode,
 } from "react"
-import type { AppState, AppAction, ViewName } from "@/types"
+import type { AppState, AppAction } from "@/types"
 import { initialFiles } from "@/data/files"
 
 const initialState: AppState = {

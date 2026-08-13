@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils"
 import { modeCopy } from "@/data/modes"
-import type { ModeName, ViewName } from "@/types"
+import type { ModeName } from "@/types"
 
 interface HeroSectionProps {
   view: "home" | "write"

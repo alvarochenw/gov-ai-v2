@@ -7,6 +7,7 @@ import {
   FileText,
   Wrench,
   Library,
+  Layers,
   UserCheck,
   MessageSquare,
   ChevronRight,
@@ -16,15 +17,22 @@ import { useAppState, useAppDispatch } from "@/hooks/use-app-state"
 
 const subNavItems: { view: string; label: string }[] = [
   { view: "write-quick", label: "快速写作" },
-  { view: "write-template", label: "模板写作" },
-  { view: "write-style", label: "风格写作" },
+  // [HIDDEN] { view: "write-template", label: "模板写作" },
+  // [HIDDEN] { view: "write-style", label: "风格写作" },
   { view: "write-ref", label: "以文写文" },
+]
+
+const toolSubItems: { view: string; label: string }[] = [
+  { view: "tool-polish", label: "AI润色" },
+  { view: "tool-proofread", label: "智能校对" },
+  { view: "tool-typeset", label: "智能排版" },
 ]
 
 export function Sidebar() {
   const state = useAppState()
   const dispatch = useAppDispatch()
   const [writeExpanded, setWriteExpanded] = useState(true)
+  const [toolsExpanded, setToolsExpanded] = useState(true)
 
   const { view, sidebarCollapsed, mobileMenuOpen } = state
 
@@ -34,6 +42,9 @@ export function Sidebar() {
 
   // Check if any write sub-view is active
   const isWriteActive = view.startsWith("write-")
+
+  // Check if any tool sub-view is active
+  const isToolsActive = view === "tool-proofread" || view === "proofread-editor" || view === "tool-typeset" || view === "tool-polish"
 
   // "会话列表" should also highlight when inside a chat
   const isSessionsActive = view === "sessions" || view === "chat"
@@ -271,16 +282,99 @@ export function Sidebar() {
           </div>
         </div>
 
-        {/* 写作工具 */}
+        {/* 写作工具 with subnav */}
+        <div className="grid gap-[3px]">
+          <button
+            type="button"
+            onClick={() => {
+              setToolsExpanded(!toolsExpanded)
+            }}
+            title="写作工具"
+            className={cn(
+              "w-full border-0 cursor-pointer text-left text-inherit",
+              "flex items-center transition-[background,color,transform,box-shadow] duration-150",
+              "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+              isToolsActive
+                ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
+                : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
+            )}
+          >
+            <span
+              className={cn(
+                "w-[34px] h-[34px] grid place-items-center rounded-[11px] flex-none",
+                isToolsActive
+                  ? "text-white bg-gradient-to-br from-[#d85061] to-[#b22b3e] shadow-[0_8px_18px_rgba(178,43,62,0.18)]"
+                  : "text-muted-text bg-white/55"
+              )}
+            >
+              <Wrench className="w-[19px] h-[19px]" />
+            </span>
+            <span
+              className={cn(
+                "whitespace-nowrap overflow-hidden",
+                "transition-[opacity,max-width] duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+                sidebarCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-[140px]"
+              )}
+            >
+              写作工具
+            </span>
+            <ChevronRight
+              className={cn(
+                "ml-auto w-4 h-4 text-subtle transition-[transform,opacity,max-width] duration-[280ms]",
+                toolsExpanded && "rotate-90",
+                sidebarCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-4"
+              )}
+            />
+          </button>
+
+          {/* Tool subnav */}
+          <div
+            className={cn(
+              "ml-[27px] pl-[19px] grid gap-[3px] py-1 border-l border-[rgba(169,38,57,0.14)]",
+              "transition-[max-height,opacity] duration-[280ms] ease-[cubic-bezier(0.4,0,0.2,1)] overflow-hidden",
+              toolsExpanded && !sidebarCollapsed
+                ? "max-h-[200px] opacity-100"
+                : "max-h-0 opacity-0 py-0 border-l-0"
+            )}
+            aria-label="写作工具"
+          >
+            {toolSubItems.map((item) => (
+              <button
+                key={item.view}
+                type="button"
+                onClick={() => handleNavClick(item.view)}
+                className={cn(
+                  "flex items-center min-h-[34px] px-[11px] py-[7px] rounded-[10px]",
+                  "bg-transparent text-muted-text text-[13px] border-0 cursor-pointer text-left",
+                  "transition-[background,color] duration-150 hover:bg-white/64",
+                  view === item.view &&
+                    "text-accent-deep bg-accent-soft font-[680]"
+                )}
+              >
+                <span
+                  className={cn(
+                    "w-1.5 h-1.5 rounded-full mr-[9px] flex-none",
+                    view === item.view
+                      ? "bg-primary shadow-[0_0_0_4px_rgba(200,60,78,0.10)]"
+                      : "bg-[#d7cdd1]"
+                  )}
+                />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 模板库 */}
         <button
           type="button"
-          onClick={() => handleNavClick("tools")}
-          title="写作工具"
+          onClick={() => handleNavClick("template-library")}
+          title="模板库"
           className={cn(
             "w-full border-0 cursor-pointer text-left text-inherit",
             "flex items-center transition-[background,color,transform,box-shadow] duration-150",
             "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
-            view === "tools" || view === "tool-proofread" || view === "proofread-editor" || view === "tool-typeset"
+            view === "template-library"
               ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
               : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
           )}
@@ -288,12 +382,12 @@ export function Sidebar() {
           <span
             className={cn(
               "w-[34px] h-[34px] grid place-items-center rounded-[11px] flex-none",
-              view === "tools" || view === "tool-proofread" || view === "proofread-editor" || view === "tool-typeset"
+              view === "template-library"
                 ? "text-white bg-gradient-to-br from-[#d85061] to-[#b22b3e] shadow-[0_8px_18px_rgba(178,43,62,0.18)]"
                 : "text-muted-text bg-white/55"
             )}
           >
-            <Wrench className="w-[19px] h-[19px]" />
+            <Layers className="w-[19px] h-[19px]" />
           </span>
           <span
             className={cn(
@@ -302,7 +396,7 @@ export function Sidebar() {
               sidebarCollapsed ? "opacity-0 max-w-0" : "opacity-100 max-w-[140px]"
             )}
           >
-            写作工具
+            模板库
           </span>
         </button>
 

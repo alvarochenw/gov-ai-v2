@@ -1,7 +1,7 @@
 import {
   Clock,
-  LayoutGrid,
-  Palette,
+  // LayoutGrid,  // [HIDDEN] 模板写作
+  // Palette,     // [HIDDEN] 风格写作
   Copy,
 } from "lucide-react"
 import type { Mode } from "@/types"
@@ -14,20 +14,22 @@ export const modes: Mode[] = [
     placeholder: "请输入具体事项、背景材料、使用对象和成稿要求",
     viewName: "write-quick",
   },
-  {
-    name: "模板写作",
-    description: "按文种模板规范组织结构",
-    icon: LayoutGrid,
-    placeholder: "请选择公文文种模板",
-    viewName: "write-template",
-  },
-  {
-    name: "风格写作",
-    description: "按指定口径和表达风格成文",
-    icon: Palette,
-    placeholder: "请描述参考的风格或口径",
-    viewName: "write-style",
-  },
+  // [HIDDEN] 模板写作 — temporarily hidden; entry point moved to 模板库
+  // {
+  //   name: "模板写作",
+  //   description: "按文种模板规范组织结构",
+  //   icon: LayoutGrid,
+  //   placeholder: "请选择公文文种模板",
+  //   viewName: "write-template",
+  // },
+  // [HIDDEN] 风格写作 — temporarily hidden; entry point moved to 模板库
+  // {
+  //   name: "风格写作",
+  //   description: "按指定口径和表达风格成文",
+  //   icon: Palette,
+  //   placeholder: "请描述参考的风格或口径",
+  //   viewName: "write-style",
+  // },
   {
     name: "以文写文",
     description: "参考已有材料延续结构表达",

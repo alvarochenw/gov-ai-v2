@@ -14,6 +14,8 @@ export type ViewName =
   | "tool-proofread"
   | "proofread-editor"
   | "tool-typeset"
+  | "tool-polish"
+  | "template-library"
 
 export type ModeName = "快速写作" | "模板写作" | "风格写作" | "以文写文"
 

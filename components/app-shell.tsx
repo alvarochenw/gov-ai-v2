@@ -15,6 +15,7 @@ import { ToolCard } from "@/components/tool-card"
 import { SessionListView } from "@/components/session-list-view"
 import { KnowledgeView } from "@/components/knowledge-view"
 import { ExpertCard } from "@/components/expert-card"
+import { TemplateLibraryView } from "@/components/template-library-view"
 import { ChatView } from "@/components/chat-view"
 import { QuickWriteView } from "@/components/quick-write-view"
 import { TemplateWriteView } from "@/components/template-write-view"
@@ -23,6 +24,7 @@ import { RefWriteView } from "@/components/ref-write-view"
 import { ProofreadConfigView } from "@/components/proofread-config-view"
 import { ProofreadEditorView } from "@/components/proofread-editor-view"
 import { TypesetConfigView } from "@/components/typeset-config-view"
+import { PolishConfigView } from "@/components/polish-config-view"
 import { modes } from "@/data/modes"
 import { tools } from "@/data/tools"
 import { experts } from "@/data/experts"
@@ -34,8 +36,8 @@ import type { ModeName } from "@/types"
 
 const writingSubItems = [
   { view: "write-quick", label: "快速写作" },
-  { view: "write-template", label: "模板写作" },
-  { view: "write-style", label: "风格写作" },
+  // [HIDDEN] { view: "write-template", label: "模板写作" },
+  // [HIDDEN] { view: "write-style", label: "风格写作" },
   { view: "write-ref", label: "以文写文" },
 ]
 
@@ -105,7 +107,7 @@ function MobileNav() {
   const isActive = (view: string) => {
     if (view === "home") return state.view === "home"
     if (view === "tools")
-      return ["tools", "tool-proofread", "proofread-editor", "tool-typeset"].includes(state.view)
+      return ["tools", "tool-proofread", "proofread-editor", "tool-typeset", "tool-polish"].includes(state.view)
     return state.view === view
   }
 
@@ -118,6 +120,7 @@ function MobileNav() {
     { label: "新建", view: "home" },
     // writing is special — expandable
     { label: "工具", view: "tools" },
+    { label: "模板", view: "template-library" },
     { label: "知识", view: "knowledge" },
     { label: "专家", view: "experts" },
   ]
@@ -233,6 +236,10 @@ export function AppShell() {
       dispatch({ type: "SET_VIEW", view: "tool-typeset" })
       return
     }
+    if (name === "AI润色") {
+      dispatch({ type: "SET_VIEW", view: "tool-polish" })
+      return
+    }
     setPendingPrompt(prompt)
     dispatch({ type: "SET_EXPERT", expert: name })
     dispatch({ type: "SET_CHAT_MODE", mode: "快速写作" })
@@ -240,11 +247,11 @@ export function AppShell() {
     dispatch({ type: "SET_VIEW", view: "chat" })
   }
 
-  const handleExpertChange = (name: string, prompt: string) => {
+  const handleExpertChange = (name: string) => {
     dispatch({ type: "SET_EXPERT", expert: name })
   }
 
-  const handleExpertSelectFromPage = (name: string, prompt: string) => {
+  const handleExpertSelectFromPage = (name: string) => {
     dispatch({ type: "SET_EXPERT", expert: name })
     dispatch({ type: "SET_VIEW", view: "home" })
   }
@@ -272,7 +279,7 @@ export function AppShell() {
         </h2>
       </div>
       <div
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+        className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-2 gap-3"
         aria-label="写作模式"
       >
         {modes.map((m) => (
@@ -295,15 +302,9 @@ export function AppShell() {
               常用写作工具
             </h2>
           </div>
-          <button
-            type="button"
-            onClick={() => dispatch({ type: "SET_VIEW", view: "tools" })}
-            className="border-0 px-[2px] py-[5px] inline-flex items-center gap-[5px] bg-transparent text-accent-deep cursor-pointer text-[11px] font-[680] hover:text-primary"
-          >
-            查看全部工具
-          </button>
+          {/* [HIDDEN] 查看全部工具 */}
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
           {tools.slice(0, 4).map((tool) => (
             <ToolCard
               key={tool.name}
@@ -384,7 +385,7 @@ export function AppShell() {
             isPinned={state.pinnedExperts.includes(expert.name)}
             isDefault={state.defaultExpert === expert.name}
             pinnedCount={state.pinnedExperts.length}
-            onClick={() => handleExpertSelectFromPage(expert.name, expert.prompt)}
+            onClick={() => handleExpertSelectFromPage(expert.name)}
             onPin={(name) => dispatch({ type: "PIN_EXPERT", name })}
             onUnpin={(name) => dispatch({ type: "UNPIN_EXPERT", name })}
             onSetDefault={(name) => dispatch({ type: "SET_DEFAULT_EXPERT", name })}
@@ -409,6 +410,8 @@ export function AppShell() {
         return <RefWriteView />
       case "knowledge":
         return <KnowledgeView />
+      case "template-library":
+        return <TemplateLibraryView />
       case "tools":
         return renderTools()
       case "experts":
@@ -423,6 +426,8 @@ export function AppShell() {
         return <ProofreadEditorView />
       case "tool-typeset":
         return <TypesetConfigView />
+      case "tool-polish":
+        return <PolishConfigView />
       default:
         return renderHome()
     }

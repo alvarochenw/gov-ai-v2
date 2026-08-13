@@ -18,7 +18,6 @@ interface NavButtonProps {
 }
 
 export function NavButton({
-  viewName,
   icon: Icon,
   label,
   active,

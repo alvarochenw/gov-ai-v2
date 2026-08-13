@@ -38,6 +38,8 @@ export function useWorkflowChat(opts: UseWorkflowChatOptions): UseWorkflowChatRe
   const isStreamingRef = useRef(false)
   const appIdRef = useRef(opts.appId)
 
+  const initialGreeting = opts?.initialGreeting
+
   const updateStreaming = useCallback((val: boolean) => {
     isStreamingRef.current = val
     setIsStreaming(val)
@@ -368,10 +370,10 @@ export function useWorkflowChat(opts: UseWorkflowChatOptions): UseWorkflowChatRe
 
   const clearChat = useCallback(() => {
     abortRef.current?.abort()
-    setMessages(opts?.initialGreeting ? [opts.initialGreeting] : [])
+    setMessages(initialGreeting ? [initialGreeting] : [])
     setExecutionId(null)
     updateStreaming(false)
-  }, [opts?.initialGreeting, updateStreaming])
+  }, [initialGreeting, updateStreaming])
 
   return { messages, isStreaming, executionId, sendMessage, clearChat }
 }

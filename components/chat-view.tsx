@@ -148,7 +148,6 @@ export function ChatView() {
         type: "ADD_MESSAGE",
         message: createMessage("assistant", firstStep.prompt, firstStep.type, firstStep.options),
       })
-      setCurrentStep(0)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -174,11 +173,14 @@ export function ChatView() {
     isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
   }, [])
 
+  const scrollMessages = activeChat ? activeChat.messages : messages
+  const scrollStreaming = activeChat?.isStreaming
+
   useEffect(() => {
     if (scrollRef.current && isAtBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [activeChat ? activeChat.messages : messages, activeChat?.isStreaming, isGenerating])
+  }, [scrollMessages, scrollStreaming, isGenerating])
 
   // ── Auto-save session when messages change ──
   const prevMessageCountRef = useRef(0)

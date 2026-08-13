@@ -1,4 +1,4 @@
-import type { ViewName, ViewMeta } from "@/types"
+import type { ViewMeta } from "@/types"
 
 export const viewMeta: Record<string, ViewMeta> = {
   home: {
@@ -48,5 +48,13 @@ export const viewMeta: Record<string, ViewMeta> = {
   "tool-typeset": {
     title: "智能排版",
     subtitle: "上传公文或粘贴文本，选择排版模板，一键规范公文格式",
+  },
+  "tool-polish": {
+    title: "AI润色",
+    subtitle: "上传公文或粘贴文本，优化措辞和语气，增强表达力",
+  },
+  "template-library": {
+    title: "模板库",
+    subtitle: "管理和复用结构模板与风格模板",
   },
 }

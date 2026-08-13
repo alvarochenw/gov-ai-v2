@@ -33,6 +33,8 @@ export function useAgentChat(opts?: UseAgentChatOptions): UseAgentChatReturn {
   const isStreamingRef = useRef(false)
   const sessionIdRef = useRef<string | null>(null)
 
+  const initialGreeting = opts?.initialGreeting
+
   const updateStreaming = useCallback((val: boolean) => {
     isStreamingRef.current = val
     setIsStreaming(val)
@@ -347,10 +349,10 @@ export function useAgentChat(opts?: UseAgentChatOptions): UseAgentChatReturn {
 
   const clearChat = useCallback(() => {
     abortRef.current?.abort()
-    setMessages(opts?.initialGreeting ? [opts.initialGreeting] : [])
+    setMessages(initialGreeting ? [initialGreeting] : [])
     updateSessionId(null)
     updateStreaming(false)
-  }, [opts?.initialGreeting, updateStreaming, updateSessionId])
+  }, [initialGreeting, updateStreaming, updateSessionId])
 
   return { messages, isStreaming, sessionId, sendMessage, clearChat }
 }

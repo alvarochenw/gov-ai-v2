@@ -42,8 +42,6 @@ export const writingModeOptions: WritingModeOption[] = [
 /*  Mock extraction (multi-material)                                  */
 /* ------------------------------------------------------------------ */
 
-const uid = () => crypto.randomUUID()
-
 export async function mockExtractRefOverview(
   materials: RefMaterial[]
 ): Promise<RefOverview> {
