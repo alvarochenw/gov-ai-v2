@@ -1,481 +1,93 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import {
-  LayoutGrid, ArrowRight, Upload, FileText, Check,
-  Plus, Trash2,
-  Save, Copy, Loader2, X,
-} from "lucide-react"
+import { LayoutGrid, ArrowRight, X, FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useAppDispatch, useAppState } from "@/hooks/use-app-state"
+import { useAppDispatch } from "@/hooks/use-app-state"
 import { modeCopy } from "@/data/modes"
-import {
-  type TemplateSection,
-  type WritingTemplate,
-  mockExtractFromFile,
-  loadSavedTemplates,
-  saveTemplates,
-  createBlankTemplate,
-} from "@/data/template"
-import { setTemplateWritingInput, type ReferenceFile } from "@/lib/template-data"
-import { SectionCard, validateSectionWordRange } from "@/components/section-card"
-import { ConfirmDialog } from "@/components/confirm-dialog"
-import { FileRow } from "@/components/file-row"
+import { type WritingTemplate, loadSavedTemplates } from "@/data/template"
+import { setTemplateWritingInput } from "@/lib/template-data"
+import { TemplatePickerDialog } from "@/components/template-picker-dialog"
 
-/* ------------------------------------------------------------------ */
-/*  Types & constants                                                 */
-/* ------------------------------------------------------------------ */
-
-type SourceTab = "file" | "saved" | "custom"
-type RefTab = "local" | "knowledge"
-const MAX_TEMPLATES = 10
-
-function validateWordRange(sections: TemplateSection[]): boolean {
-  return sections.every(validateSectionWordRange)
+/** Group flat sections into [parent, ...children] arrays (read-only display). */
+function toGroups(sections: WritingTemplate["sections"]) {
+  const groups: WritingTemplate["sections"][] = []
+  let current: WritingTemplate["sections"] = []
+  for (const s of sections) {
+    if (s.level === 1) {
+      if (current.length) groups.push(current)
+      current = [s]
+    } else if (current.length) {
+      current.push(s)
+    }
+  }
+  if (current.length) groups.push(current)
+  return groups
 }
-
-/* ------------------------------------------------------------------ */
-/*  Helper: generate a new id                                         */
-/* ------------------------------------------------------------------ */
-
-const uid = () => crypto.randomUUID()
-
-/* ------------------------------------------------------------------ */
-/*  Main component                                                    */
-/* ------------------------------------------------------------------ */
 
 export function TemplateWriteView() {
   const dispatch = useAppDispatch()
-  const state = useAppState()
   const copy = modeCopy["模板写作"]
 
-  /* ---- state ---- */
-  const [sourceTab, setSourceTab] = useState<SourceTab>("file")
-  // file extraction
-  const [fileUploadTab, setFileUploadTab] = useState<"local" | "knowledge">("local")
-  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
-  const [isExtracting, setIsExtracting] = useState(false)
-  // active template being edited
-  const [activeTemplate, setActiveTemplate] = useState<WritingTemplate | null>(null)
-  // saved templates (localStorage)
-  const [savedTemplates, setSavedTemplates] = useState<WritingTemplate[]>(() => loadSavedTemplates())
-  // global writing requirements
+  // global prompt fields
+  const [documentTitle, setDocumentTitle] = useState("")
+  const [draftingUnit, setDraftingUnit] = useState("")
   const [additionalNotes, setAdditionalNotes] = useState("")
-  // reference documents
-  const [refTab, setRefTab] = useState<RefTab>("local")
-  const [referenceFiles, setReferenceFiles] = useState<ReferenceFile[]>([])
-  const [localRefName, setLocalRefName] = useState<string | null>(null)
-  const [selectedKnowledgeName, setSelectedKnowledgeName] = useState<string | null>(null)
-  // delete confirmation
-  const [deleteTarget, setDeleteTarget] = useState<WritingTemplate | null>(null)
 
-  /* ---- section helpers ---- */
-  const updateSection = useCallback((id: string, patch: Partial<TemplateSection>) => {
-    setActiveTemplate((prev) =>
-      prev
-        ? { ...prev, sections: prev.sections.map((s) => (s.id === id ? { ...s, ...patch } : s)) }
-        : null
-    )
-  }, [])
+  // selected template
+  const [selectedTemplate, setSelectedTemplate] = useState<WritingTemplate | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
 
-  const addSection = useCallback(() => {
-    setActiveTemplate((prev) => {
-      if (!prev) return null
-      const nextOrder = prev.sections.length
-      return {
-        ...prev,
-        sections: [
-          ...prev.sections,
-          {
-            id: uid(), title: "", fixedTitle: false, required: true,
-            generationHint: "", wordCountMin: null, wordCountMax: null, order: nextOrder,
-          },
-        ],
-      }
-    })
-  }, [])
-
-  const removeSection = useCallback((id: string) => {
-    setActiveTemplate((prev) => {
-      if (!prev) return null
-      const filtered = prev.sections.filter((s) => s.id !== id)
-      return { ...prev, sections: filtered.map((s, i) => ({ ...s, order: i })) }
-    })
-  }, [])
-
-  const moveSection = useCallback((id: string, direction: "up" | "down") => {
-    setActiveTemplate((prev) => {
-      if (!prev) return null
-      const arr = [...prev.sections]
-      const idx = arr.findIndex((s) => s.id === id)
-      if (idx < 0) return prev
-      const swapIdx = direction === "up" ? idx - 1 : idx + 1
-      if (swapIdx < 0 || swapIdx >= arr.length) return prev
-      ;[arr[idx], arr[swapIdx]] = [arr[swapIdx], arr[idx]]
-      return { ...prev, sections: arr.map((s, i) => ({ ...s, order: i })) }
-    })
-  }, [])
-
-  /* ---- save / delete templates ---- */
-  const persistTemplates = useCallback((next: WritingTemplate[]) => {
-    setSavedTemplates(next)
-    saveTemplates(next)
-  }, [])
-
-  const handleSaveTemplate = useCallback(() => {
-    if (!activeTemplate) return
-    const now = new Date().toISOString()
-    const updated = { ...activeTemplate, updatedAt: now }
-    setActiveTemplate(updated)
-
-    const exists = savedTemplates.some((t) => t.id === updated.id)
-    if (exists) {
-      persistTemplates(savedTemplates.map((t) => (t.id === updated.id ? updated : t)))
-    } else {
-      if (savedTemplates.length >= MAX_TEMPLATES) return
-      persistTemplates([...savedTemplates, updated])
-    }
-  }, [activeTemplate, savedTemplates, persistTemplates])
-
-  const handleSaveAsNew = useCallback(() => {
-    if (!activeTemplate || savedTemplates.length >= MAX_TEMPLATES) return
-    const now = new Date().toISOString()
-    const newTemplate: WritingTemplate = {
-      ...activeTemplate,
-      id: uid(),
-      name: activeTemplate.name ? `${activeTemplate.name} (副本)` : "未命名模板",
-      createdAt: now,
-      updatedAt: now,
-    }
-    setActiveTemplate(newTemplate)
-    persistTemplates([...savedTemplates, newTemplate])
-  }, [activeTemplate, savedTemplates, persistTemplates])
-
-  const handleDeleteTemplate = useCallback(() => {
-    if (!deleteTarget) return
-    const next = savedTemplates.filter((t) => t.id !== deleteTarget.id)
-    persistTemplates(next)
-    // if deleting the active template, clear editor
-    if (activeTemplate?.id === deleteTarget.id) {
-      setActiveTemplate(null)
-    }
-    setDeleteTarget(null)
-  }, [deleteTarget, savedTemplates, activeTemplate, persistTemplates])
-
-  /* ---- file extraction ---- */
-  const handleExtract = useCallback(async () => {
-    if (!uploadedFileName) return
-    setIsExtracting(true)
-    try {
-      const template = await mockExtractFromFile(uploadedFileName)
-      setActiveTemplate(template)
-    } finally {
-      setIsExtracting(false)
-    }
-  }, [uploadedFileName])
-
-  /* ---- select saved template ---- */
-  const handleSelectSaved = useCallback((t: WritingTemplate) => {
-    setActiveTemplate({ ...t, sections: t.sections.map((s) => ({ ...s })) })
-  }, [])
-
-  /* ---- custom creation ---- */
-  const handleStartCustom = useCallback(() => {
-    setActiveTemplate(createBlankTemplate())
-  }, [])
-
-  /* ---- reference files ---- */
-  const addLocalRef = useCallback(() => {
-    if (!localRefName) return
-    setReferenceFiles((prev) => [...prev, { source: "local", name: localRefName }])
-    setLocalRefName(null)
-  }, [localRefName])
-
-  const addKnowledgeRef = useCallback(() => {
-    if (!selectedKnowledgeName) return
-    if (referenceFiles.some((f) => f.name === selectedKnowledgeName)) return
-    setReferenceFiles((prev) => [...prev, { source: "knowledge", name: selectedKnowledgeName }])
-    setSelectedKnowledgeName(null)
-  }, [selectedKnowledgeName, referenceFiles])
-
-  const removeRef = useCallback((name: string) => {
-    setReferenceFiles((prev) => prev.filter((f) => f.name !== name))
-  }, [])
-
-  /* ---- validation ---- */
   const canStart =
-    activeTemplate !== null &&
-    activeTemplate.name.trim().length > 0 &&
-    activeTemplate.sections.length > 0 &&
-    activeTemplate.sections.every((s) => s.title.trim().length > 0) &&
-    validateWordRange(activeTemplate.sections)
+    documentTitle.trim().length > 0 &&
+    selectedTemplate !== null &&
+    additionalNotes.trim().length > 0
 
-  /* ---- start writing ---- */
-  const handleStart = () => {
-    if (!activeTemplate || !canStart) return
+  const handleStart = useCallback(() => {
+    if (!selectedTemplate || !canStart) return
     setTemplateWritingInput({
-      templateName: activeTemplate.name,
-      sections: activeTemplate.sections,
-      referenceFiles,
+      templateName: selectedTemplate.name,
+      sections: selectedTemplate.sections,
+      referenceFiles: [],
       totalWordCountMin: null,
       totalWordCountMax: null,
       additionalNotes,
+      documentTitle,
+      draftingUnit,
     })
     dispatch({ type: "SET_CHAT_MODE", mode: "模板写作" })
     dispatch({ type: "CLEAR_CHAT" })
     dispatch({ type: "SET_VIEW", view: "chat" })
-  }
+  }, [selectedTemplate, canStart, additionalNotes, documentTitle, draftingUnit, dispatch])
 
-  /* ---- derived ---- */
-  const savedCount = savedTemplates.length
-  const reachedMax = savedCount >= MAX_TEMPLATES
-  const activeId = activeTemplate?.id ?? null
-
-  /* ================================================================ */
-  /*  Render                                                          */
-  /* ================================================================ */
+  // force re-render of picker list each open by keying on open state
+  const hasTemplates = loadSavedTemplates().length > 0
 
   return (
-    <div className="w-[min(960px,100%)] mx-auto">
+    <div className="mx-auto w-full min-h-full p-6 md:p-8" style={{ maxWidth: "min(1120px, 100%)" }}>
       {/* Header */}
-      <div className="flex items-center gap-4 mb-8">
-        <span className="w-14 h-14 grid place-items-center rounded-2xl text-accent-deep bg-accent-soft">
-          <LayoutGrid className="w-7 h-7" />
-        </span>
-        <div>
-          <h1 className="text-2xl font-[760] tracking-[-0.03em]">{copy.title}</h1>
-          <p className="mt-1 text-muted-text text-sm">{copy.subtitle}</p>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-xl font-[680] text-foreground mb-1">模板写作</h1>
+        <p className="text-sm text-muted-text">{copy.subtitle}</p>
       </div>
 
       {/* ============================================================ */}
-      {/*  Card 1 — Source selection                                   */}
+      {/*  Card 1 — 写作基础信息(全局提示词)                          */}
       {/* ============================================================ */}
       <div className="bg-white/80 border border-line rounded-2xl p-6 mb-6">
-        <h3 className="text-sm font-[660] mb-3">一、选择结构模板来源</h3>
+        <h3 className="text-sm font-[660] mb-4">一、写作基础信息</h3>
 
-        {/* Source tabs */}
-        <div className="flex gap-2 mb-5">
-          {(["file", "saved", "custom"] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => {
-                setSourceTab(tab)
-                if (tab === "custom" && !activeTemplate) handleStartCustom()
-              }}
-              className={cn(
-                "px-4 py-2 rounded-xl text-sm font-[620] cursor-pointer border transition-[background,color,border-color] duration-150",
-                sourceTab === tab
-                  ? "bg-accent-soft text-accent-deep border-[rgba(200,60,78,0.24)]"
-                  : "bg-transparent text-muted-text border-transparent hover:bg-white/60"
-              )}
-            >
-              {tab === "file" ? "从文件提取" : tab === "saved" ? "我的结构模板" : "自定义创建"}
-            </button>
-          ))}
-        </div>
-
-        {/* ---- File extraction panel ---- */}
-        {sourceTab === "file" && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          {/* 公文标题(必填) */}
           <div>
-            {/* Upload sub-tabs */}
-            <div className="flex gap-2 mb-4">
-              <button
-                type="button"
-                onClick={() => setFileUploadTab("local")}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-[620] cursor-pointer border transition-[background,color,border-color] duration-150",
-                  fileUploadTab === "local"
-                    ? "bg-white text-foreground border-line"
-                    : "bg-transparent text-muted-text border-transparent hover:bg-white/60"
-                )}
-              >
-                本地上传
-              </button>
-              <button
-                type="button"
-                onClick={() => setFileUploadTab("knowledge")}
-                className={cn(
-                  "px-3 py-1.5 rounded-lg text-xs font-[620] cursor-pointer border transition-[background,color,border-color] duration-150",
-                  fileUploadTab === "knowledge"
-                    ? "bg-white text-foreground border-line"
-                    : "bg-transparent text-muted-text border-transparent hover:bg-white/60"
-                )}
-              >
-                从知识库选择
-              </button>
-            </div>
-
-            {fileUploadTab === "local" ? (
-              /* Local upload drop zone */
-              <label
-                className={cn(
-                  "flex flex-col items-center justify-center gap-3",
-                  "border-2 border-dashed rounded-xl p-8 text-center cursor-pointer",
-                  uploadedFileName
-                    ? "border-success bg-[rgba(23,132,94,0.04)]"
-                    : "border-line hover:border-[rgba(200,60,78,0.36)] hover:bg-accent-faint",
-                  "transition-[border-color,background] duration-150"
-                )}
-              >
-                {uploadedFileName ? (
-                  <>
-                    <FileText className="w-8 h-8 text-success" />
-                    <span className="text-sm font-[620] text-foreground">{uploadedFileName}</span>
-                    <span className="text-xs text-muted-text">点击重新选择</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-8 h-8 text-muted-text" />
-                    <span className="text-sm text-muted-text">
-                      拖拽文件到此处，或<span className="text-accent-deep font-[620]">点击选择文件</span>
-                    </span>
-                    <span className="text-xs text-subtle">支持 .docx .pdf .txt 格式</span>
-                  </>
-                )}
-                <input
-                  type="file"
-                  accept=".docx,.pdf,.txt"
-                  className="sr-only"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) setUploadedFileName(file.name)
-                  }}
-                />
-              </label>
-            ) : (
-              /* Knowledge base file list */
-              <div className="border border-line rounded-xl overflow-hidden">
-                {state.files.length === 0 ? (
-                  <div className="p-6 text-center text-muted-text text-sm">知识库中暂无文件</div>
-                ) : (
-                  state.files.map((file) => (
-                    <button
-                      key={file.name}
-                      type="button"
-                      onClick={() =>
-                        setUploadedFileName(uploadedFileName === file.name ? null : file.name)
-                      }
-                      className={cn(
-                        "w-full flex items-center gap-3 px-4 py-3 border-0 bg-transparent cursor-pointer text-left",
-                        "border-b border-line last:border-b-0",
-                        "transition-[background] duration-100",
-                        uploadedFileName === file.name ? "bg-accent-faint" : "hover:bg-white/60"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "w-4 h-4 rounded-full border-2 flex-none grid place-items-center",
-                          "transition-[border-color,background] duration-150",
-                          uploadedFileName === file.name
-                            ? "border-accent-deep bg-accent-deep"
-                            : "border-line bg-white"
-                        )}
-                      >
-                        {uploadedFileName === file.name && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                        )}
-                      </span>
-                      <FileRow file={file} />
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-
-            {uploadedFileName && (
-              <button
-                type="button"
-                onClick={handleExtract}
-                disabled={isExtracting}
-                className={cn(
-                  "mt-4 w-full min-h-[40px] border rounded-xl px-4 py-2 cursor-pointer",
-                  "text-white font-[620] text-sm",
-                  "inline-flex items-center justify-center gap-2",
-                  "transition-[background,opacity] duration-150",
-                  isExtracting
-                    ? "border-line bg-[#c9c3c7] opacity-60 cursor-not-allowed"
-                    : "border-accent-deep bg-gradient-to-br from-[#cf4657] to-[#aa2639] hover:from-[#c23b4d] hover:to-[#981f32]"
-                )}
-              >
-                {isExtracting ? (
-                  <><Loader2 className="w-4 h-4 animate-spin" /> 正在提取...</>
-                ) : (
-                  <><FileText className="w-4 h-4" /> 提取结构</>
-                )}
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* ---- Saved templates panel ---- */}
-        {sourceTab === "saved" && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs text-subtle">已保存 {savedCount}/{MAX_TEMPLATES}</span>
-            </div>
-            {savedTemplates.length === 0 ? (
-              <div className="py-8 text-center text-muted-text text-sm">暂无保存的模板</div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {savedTemplates.map((t) => {
-                  const selected = activeId === t.id
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => handleSelectSaved(t)}
-                      className={cn(
-                        "relative rounded-xl p-4 text-left border cursor-pointer",
-                        "transition-[background,border-color] duration-150",
-                        selected
-                          ? "border-[rgba(200,60,78,0.36)] bg-accent-faint"
-                          : "border-line bg-white/40 hover:bg-white/60"
-                      )}
-                    >
-                      {/* check badge */}
-                      {selected && (
-                        <span className="absolute top-2 right-2 w-5 h-5 rounded-full bg-accent-deep grid place-items-center">
-                          <Check className="w-3 h-3 text-white" />
-                        </span>
-                      )}
-                      <p className="text-sm font-[660] mb-1 pr-6">{t.name}</p>
-                      <p className="text-xs text-muted-text">
-                        {t.sections.length} 个章节
-                        <span className="ml-2 text-subtle">
-                          {t.source === "file" ? "文件提取" : "自定义"}
-                        </span>
-                      </p>
-                      {/* delete button */}
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => { e.stopPropagation(); setDeleteTarget(t) }}
-                        onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setDeleteTarget(t) } }}
-                        className="absolute bottom-2 right-2 w-6 h-6 rounded-lg grid place-items-center text-muted-text hover:text-accent-deep hover:bg-white/60 cursor-pointer transition-[color,background] duration-150"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ---- Custom creation panel ---- */}
-        {sourceTab === "custom" && (
-          <div>
-            <label className="block text-xs font-[620] text-muted-text mb-1.5">模板名称</label>
+            <label className="block text-xs font-[620] text-muted-text mb-1.5">
+              公文标题<span className="text-accent-deep ml-0.5" aria-hidden>*</span>
+            </label>
             <input
               type="text"
-              value={activeTemplate?.name ?? ""}
-              onChange={(e) =>
-                setActiveTemplate((prev) => prev ? { ...prev, name: e.target.value } : null)
-              }
-              placeholder="输入模板名称，如：通知、请示、工作总结"
+              value={documentTitle}
+              onChange={(e) => setDocumentTitle(e.target.value)}
+              placeholder="如：关于XXX的通知"
               className={cn(
                 "w-full h-9 px-4 border border-line rounded-4xl text-sm",
                 "bg-white/60 text-foreground placeholder:text-subtle",
@@ -484,324 +96,225 @@ export function TemplateWriteView() {
               )}
             />
           </div>
+          {/* 拟稿单位(选填) */}
+          <div>
+            <label className="block text-xs font-[620] text-muted-text mb-1.5">拟稿单位</label>
+            <input
+              type="text"
+              value={draftingUnit}
+              onChange={(e) => setDraftingUnit(e.target.value)}
+              placeholder="如：办公室"
+              className={cn(
+                "w-full h-9 px-4 border border-line rounded-4xl text-sm",
+                "bg-white/60 text-foreground placeholder:text-subtle",
+                "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
+                "transition-[border-color,box-shadow] duration-150"
+              )}
+            />
+          </div>
+        </div>
+
+        {/* 写作要求(必填) */}
+        <div>
+          <label className="block text-xs font-[620] text-muted-text mb-1.5">
+            写作要求<span className="text-accent-deep ml-0.5" aria-hidden>*</span>
+          </label>
+          <textarea
+            value={additionalNotes}
+            onChange={(e) => setAdditionalNotes(e.target.value)}
+            placeholder="描述本次写作的具体要求，如重点内容、口径、注意事项..."
+            className={cn(
+              "w-full min-h-[100px] border border-line rounded-xl p-4 text-sm leading-relaxed resize-y",
+              "bg-white/60 text-foreground placeholder:text-subtle",
+              "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
+              "transition-[border-color,box-shadow] duration-150"
+            )}
+          />
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/*  Card 2 — 选取模板                                            */}
+      {/* ============================================================ */}
+      <div className="bg-white/80 border border-line rounded-2xl p-6 mb-6">
+        <h3 className="text-sm font-[660] mb-4">
+          二、选取模板
+          {selectedTemplate && (
+            <span className="ml-2 text-[11px] font-[580] text-muted-text">
+              （如需编辑模板，请到模板库）
+            </span>
+          )}
+        </h3>
+
+        {selectedTemplate ? (
+          <SelectedTemplateSummary
+            template={selectedTemplate}
+            onReplace={() => setPickerOpen(true)}
+            onRemove={() => setSelectedTemplate(null)}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className={cn(
+              "w-full flex flex-col items-center justify-center gap-2 py-10",
+              "border-2 border-dashed border-line rounded-xl",
+              "hover:border-[rgba(200,60,78,0.36)] hover:bg-accent-faint/40 cursor-pointer",
+              "transition-[border-color,background] duration-150"
+            )}
+          >
+            <span className="w-12 h-12 rounded-2xl bg-accent-faint text-accent-deep grid place-items-center">
+              <LayoutGrid className="w-6 h-6" />
+            </span>
+            <span className="text-sm font-[620] text-foreground">
+              {hasTemplates ? "点击选取模板" : "点击选取模板（暂无模板，将打开空列表）"}
+            </span>
+            <span className="text-xs text-muted-text">从模板库中选择结构模板，确定公文章节骨架</span>
+          </button>
         )}
       </div>
 
       {/* ============================================================ */}
-      {/*  Card 2 — Template structure editor                         */}
+      {/*  Start writing                                               */}
       {/* ============================================================ */}
-      {activeTemplate && (
-        <div className="bg-white/80 border border-line rounded-2xl p-6 mb-6">
-          <h3 className="text-sm font-[660] mb-3">二、编辑模板结构</h3>
-
-          {/* Template name (editable) */}
-          {sourceTab !== "custom" && (
-            <div className="mb-4">
-              <label className="block text-xs font-[620] text-muted-text mb-1.5">模板名称</label>
-              <input
-                type="text"
-                value={activeTemplate.name}
-                onChange={(e) =>
-                  setActiveTemplate((prev) => prev ? { ...prev, name: e.target.value } : null)
-                }
-                className={cn(
-                  "w-full h-9 px-4 border border-line rounded-4xl text-sm",
-                  "bg-white/60 text-foreground placeholder:text-subtle",
-                  "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
-                  "transition-[border-color,box-shadow] duration-150"
-                )}
-              />
-            </div>
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={handleStart}
+          disabled={!canStart}
+          className={cn(
+            "inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-sm font-[660]",
+            "transition-[background,opacity] duration-150",
+            canStart
+              ? "text-white bg-gradient-to-r from-[#cf4657] to-[#aa2639] hover:from-[#c23b4d] hover:to-[#981f32] cursor-pointer shadow-sm"
+              : "bg-muted/40 text-muted-text cursor-not-allowed"
           )}
+        >
+          开始写作
+          <ArrowRight className="w-5 h-5" />
+        </button>
+      </div>
 
-          {/* Section list */}
-          {activeTemplate.sections.length === 0 ? (
-            <div className="py-6 text-center text-muted-text text-sm">请添加至少一个章节</div>
-          ) : (
-            <div className="space-y-3 mb-4">
-              {activeTemplate.sections.map((section, idx) => (
-                <SectionCard
-                  key={section.id}
-                  section={section}
-                  index={idx}
-                  total={activeTemplate.sections.length}
-                  onUpdate={updateSection}
-                  onRemove={removeSection}
-                  onMove={moveSection}
-                />
-              ))}
-            </div>
-          )}
-
-          {/* Add section */}
-          <button
-            type="button"
-            onClick={addSection}
-            className="flex items-center gap-1.5 text-sm font-[620] text-accent-deep cursor-pointer hover:underline mb-4"
-          >
-            <Plus className="w-4 h-4" /> 添加章节
-          </button>
-
-          {/* Save actions */}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleSaveTemplate}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-[620] cursor-pointer",
-                "border-line bg-white/60 hover:bg-white/80 transition-[background] duration-150"
-              )}
-            >
-              <Save className="w-3.5 h-3.5" /> 保存模板
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveAsNew}
-              disabled={reachedMax}
-              className={cn(
-                "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-[620] cursor-pointer",
-                "transition-[background,opacity] duration-150",
-                reachedMax
-                  ? "border-line text-muted-text opacity-50 cursor-not-allowed"
-                  : "border-accent-deep bg-accent-soft text-accent-deep hover:bg-accent-faint"
-              )}
-            >
-              <Copy className="w-3.5 h-3.5" /> 另存为新模板
-            </button>
-            {reachedMax && (
-              <span className="text-xs text-accent-deep">已达到 {MAX_TEMPLATES} 个模板上限</span>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/*  Card 3 — Reference documents                               */}
-      {/* ============================================================ */}
-      {activeTemplate && (
-        <div className="bg-white/80 border border-line rounded-2xl p-6 mb-6">
-          <h3 className="text-sm font-[660] mb-3">三、添加参考文档</h3>
-
-          {/* Tab toggle: local / knowledge */}
-          <div className="flex gap-2 mb-4">
-            <button
-              type="button"
-              onClick={() => setRefTab("local")}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-[620] cursor-pointer border transition-[background,color,border-color] duration-150",
-                refTab === "local"
-                  ? "bg-white text-foreground border-line"
-                  : "bg-transparent text-muted-text border-transparent hover:bg-white/60"
-              )}
-            >
-              本地上传
-            </button>
-            <button
-              type="button"
-              onClick={() => setRefTab("knowledge")}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-[620] cursor-pointer border transition-[background,color,border-color] duration-150",
-                refTab === "knowledge"
-                  ? "bg-white text-foreground border-line"
-                  : "bg-transparent text-muted-text border-transparent hover:bg-white/60"
-              )}
-            >
-              从知识库选择
-            </button>
-          </div>
-
-          {/* Local upload */}
-          {refTab === "local" && (
-            <div>
-              <label
-                className={cn(
-                  "flex flex-col items-center justify-center gap-3",
-                  "border-2 border-dashed rounded-xl p-6 text-center cursor-pointer",
-                  localRefName
-                    ? "border-success bg-[rgba(23,132,94,0.04)]"
-                    : "border-line hover:border-[rgba(200,60,78,0.36)] hover:bg-accent-faint",
-                  "transition-[border-color,background] duration-150"
-                )}
-              >
-                {localRefName ? (
-                  <>
-                    <FileText className="w-7 h-7 text-success" />
-                    <span className="text-sm font-[620] text-foreground">{localRefName}</span>
-                    <span className="text-xs text-muted-text">点击重新选择</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-7 h-7 text-muted-text" />
-                    <span className="text-sm text-muted-text">
-                      拖拽文件到此处，或<span className="text-accent-deep font-[620]">点击选择文件</span>
-                    </span>
-                    <span className="text-xs text-subtle">支持 .docx .pdf .txt 格式</span>
-                  </>
-                )}
-                <input
-                  type="file"
-                  accept=".docx,.pdf,.txt"
-                  className="sr-only"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0]
-                    if (file) setLocalRefName(file.name)
-                  }}
-                />
-              </label>
-              {localRefName && (
-                <button
-                  type="button"
-                  onClick={addLocalRef}
-                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-line bg-white/60 text-sm font-[620] cursor-pointer hover:bg-white/80 transition-[background] duration-150"
-                >
-                  <Plus className="w-3.5 h-3.5" /> 添加此文件
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Knowledge base */}
-          {refTab === "knowledge" && (
-            <div>
-              {state.files.length === 0 ? (
-                <div className="py-6 text-center text-muted-text text-sm">知识库中暂无文件</div>
-              ) : (
-                <div className="border border-line rounded-xl overflow-hidden">
-                  {state.files.map((file) => {
-                    const active = selectedKnowledgeName === file.name
-                    const alreadyAdded = referenceFiles.some((f) => f.name === file.name)
-                    return (
-                      <button
-                        key={file.name}
-                        type="button"
-                        onClick={() => setSelectedKnowledgeName(active ? null : file.name)}
-                        disabled={alreadyAdded}
-                        className={cn(
-                          "w-full flex items-center gap-3 px-4 py-3 border-0 bg-transparent cursor-pointer text-left",
-                          "border-b border-line last:border-b-0",
-                          "transition-[background] duration-100",
-                          alreadyAdded ? "opacity-40 cursor-not-allowed" : active ? "bg-accent-faint" : "hover:bg-white/60"
-                        )}
-                      >
-                        {/* Radio indicator */}
-                        <span
-                          className={cn(
-                            "w-4 h-4 rounded-full border-2 flex-none grid place-items-center",
-                            "transition-[border-color,background] duration-150",
-                            active
-                              ? "border-accent-deep bg-accent-deep"
-                              : "border-line bg-white"
-                          )}
-                        >
-                          {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
-                        </span>
-                        <FileRow file={file} />
-                        {alreadyAdded && (
-                          <span className="ml-auto text-xs text-muted-text flex-none">已添加</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-              {selectedKnowledgeName && (
-                <button
-                  type="button"
-                  onClick={addKnowledgeRef}
-                  className="mt-3 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-line bg-white/60 text-sm font-[620] cursor-pointer hover:bg-white/80 transition-[background] duration-150"
-                >
-                  <Plus className="w-3.5 h-3.5" /> 添加此文件
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Added reference files list */}
-          {referenceFiles.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-line">
-              <p className="text-xs font-[620] text-muted-text mb-2">
-                已添加 {referenceFiles.length} 个参考文档
-              </p>
-              <div className="space-y-2">
-                {referenceFiles.map((f) => (
-                  <div
-                    key={f.name}
-                    className="flex items-center gap-2 rounded-lg px-3 py-2 bg-white/60 border border-line"
-                  >
-                    <FileText className="w-4 h-4 text-muted-text flex-none" />
-                    <span className="text-sm flex-1 min-w-0 truncate">{f.name}</span>
-                    <span className="text-[10px] text-subtle flex-none">
-                      {f.source === "local" ? "本地上传" : "知识库"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => removeRef(f.name)}
-                      className="w-5 h-5 rounded grid place-items-center text-muted-text hover:text-accent-deep hover:bg-white/60 cursor-pointer transition-[color,background] duration-150 flex-none"
-                      title="移除"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/*  Card 4 — Writing requirements                              */}
-      {/* ============================================================ */}
-      {activeTemplate && (
-        <div className="bg-white/80 border border-line rounded-2xl p-6 mb-6">
-          <h3 className="text-sm font-[660] mb-3">四、写作要求</h3>
-
-          {/* Additional notes */}
-          <textarea
-            value={additionalNotes}
-            onChange={(e) => setAdditionalNotes(e.target.value)}
-            placeholder="补充说明：对全文的语气、风格、重点等要求..."
-            className={cn(
-              "w-full min-h-[100px] border border-line rounded-xl p-4 text-sm leading-relaxed",
-              "bg-white/60 text-foreground placeholder:text-subtle",
-              "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
-              "transition-[border-color,box-shadow] duration-150 resize-y"
-            )}
-          />
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/*  CTA button                                                  */}
-      {/* ============================================================ */}
-      <button
-        type="button"
-        onClick={handleStart}
-        disabled={!canStart}
-        className={cn(
-          "w-full min-h-[48px] border rounded-2xl px-6 py-3 cursor-pointer",
-          "text-white font-[660] text-base",
-          "inline-flex items-center justify-center gap-2",
-          "transition-[background,box-shadow,opacity] duration-150",
-          canStart
-            ? "border-accent-deep bg-gradient-to-br from-[#cf4657] to-[#aa2639] shadow-[0_10px_22px_rgba(170,38,57,0.18)] hover:from-[#c23b4d] hover:to-[#981f32]"
-            : "border-line bg-[#c9c3c7] opacity-60 cursor-not-allowed"
-        )}
-      >
-        开始模板写作
-        <ArrowRight className="w-5 h-5" />
-      </button>
-
-      {/* Delete confirmation dialog */}
-      <ConfirmDialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
-        title="删除模板"
-        description={`确定删除模板「${deleteTarget?.name}」吗？此操作不可撤销。`}
-        variant="destructive"
-        onConfirm={handleDeleteTemplate}
+      <TemplatePickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onPick={(t) => setSelectedTemplate(t)}
       />
     </div>
   )
 }
 
+/* ------------------------------------------------------------------ */
+/*  Selected template summary (read-only)                             */
+/* ------------------------------------------------------------------ */
+
+function SelectedTemplateSummary({
+  template,
+  onReplace,
+  onRemove,
+}: {
+  template: WritingTemplate
+  onReplace: () => void
+  onRemove: () => void
+}) {
+  const isPreset = template.id.startsWith("preset-")
+  const groups = toGroups(template.sections)
+
+  return (
+    <div className="relative border border-line rounded-xl p-4 bg-white/60">
+      {/* header */}
+      <div className="flex items-start gap-3 mb-3">
+        <span className="w-9 h-9 rounded-xl bg-accent-faint text-accent-deep grid place-items-center flex-none">
+          <LayoutGrid className="w-4.5 h-4.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h4 className="text-sm font-[680] text-foreground truncate">{template.name}</h4>
+            <span
+              className={cn(
+                "text-[9px] font-[660] px-1.5 py-0.5 rounded flex-none",
+                isPreset ? "bg-primary/10 text-primary" : "bg-accent-soft text-accent-deep"
+              )}
+            >
+              {isPreset ? "预设" : template.source === "file" ? "文件提取" : "自定义"}
+            </span>
+          </div>
+          <p className="text-xs text-muted-text mt-0.5">
+            {groups.length} 个一级标题 · 共 {template.sections.length} 个章节
+          </p>
+        </div>
+      </div>
+
+      {/* section list (read-only, with sub-heading indent) */}
+      <div className="space-y-1.5 border-t border-line pt-3">
+        {groups.map((group, gi) => (
+          <div key={group[0].id}>
+            {group.map((s, si) => {
+              const isSub = s.level === 2
+              const label = isSub ? `${gi + 1}.${si}` : `${gi + 1}`
+              const wordRange =
+                s.wordCountMin != null && s.wordCountMax != null
+                  ? `${s.wordCountMin}-${s.wordCountMax}字`
+                  : s.wordCountMin != null
+                    ? `≥${s.wordCountMin}字`
+                    : s.wordCountMax != null
+                      ? `≤${s.wordCountMax}字`
+                      : ""
+              return (
+                <div
+                  key={s.id}
+                  className={cn(
+                    "flex items-center gap-2 py-1",
+                    isSub && "ml-6"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "text-[11px] font-[680] text-muted-text w-6 text-center flex-none",
+                      isSub && "text-[10px]"
+                    )}
+                  >
+                    {label}
+                  </span>
+                  <FileText className="w-3.5 h-3.5 text-muted-text flex-none" />
+                  <span
+                    className={cn(
+                      "text-xs flex-1 min-w-0 truncate",
+                      isSub ? "text-muted-text font-[560]" : "text-foreground font-[600]"
+                    )}
+                  >
+                    {s.title || "（无标题）"}
+                  </span>
+                  {wordRange && (
+                    <span className="text-[10px] text-subtle flex-none">{wordRange}</span>
+                  )}
+                  {s.writingMode === "fill" && (
+                    <span className="text-[10px] text-accent-deep/70 flex-none">占位符</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* actions */}
+      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-line">
+        <button
+          type="button"
+          onClick={onReplace}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white/60 text-xs font-[620] cursor-pointer hover:bg-white/80 transition-[background] duration-150"
+        >
+          <LayoutGrid className="w-3.5 h-3.5" /> 更换模板
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-[620] text-muted-text hover:text-accent-deep cursor-pointer border-0 bg-transparent transition-colors duration-150"
+        >
+          <X className="w-3.5 h-3.5" /> 移除
+        </button>
+      </div>
+    </div>
+  )
+}

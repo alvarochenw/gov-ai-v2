@@ -36,7 +36,7 @@ import type { ModeName } from "@/types"
 
 const writingSubItems = [
   { view: "write-quick", label: "快速写作" },
-  // [HIDDEN] { view: "write-template", label: "模板写作" },
+  { view: "write-template", label: "模板写作" },
   // [HIDDEN] { view: "write-style", label: "风格写作" },
   { view: "write-ref", label: "以文写文" },
 ]

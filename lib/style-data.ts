@@ -3,13 +3,13 @@
  * to the chat page. Follows the same pattern as template-data.ts.
  */
 
-import type { StyleDimension } from "@/data/style"
+import type { StyleSpec } from "@/data/style"
 import type { ReferenceFile } from "@/lib/template-data"
 
 export interface StyleWritingInput {
   templateName: string
-  dimensions: StyleDimension[]
-  styleNote: string
+  styleSpec: StyleSpec
+  writingRequirements: string[]
   referenceFiles: ReferenceFile[]
   additionalNotes: string
 }

@@ -16,7 +16,9 @@ export interface TemplateWritingInput {
   referenceFiles: ReferenceFile[]
   totalWordCountMin: number | null
   totalWordCountMax: number | null
-  additionalNotes: string
+  additionalNotes: string        // 写作要求(全局提示词)
+  documentTitle: string          // 公文标题
+  draftingUnit: string           // 拟稿单位(选填)
 }
 
 let pendingInput: TemplateWritingInput | null = null

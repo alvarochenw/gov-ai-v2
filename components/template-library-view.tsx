@@ -4,6 +4,7 @@ import { useState, useCallback } from "react"
 import {
   LayoutGrid, Palette, Plus, Upload, FileText,
   ArrowLeft, Save, Copy, Loader2, X, Pencil,
+  ChevronUp, ChevronDown,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
@@ -15,15 +16,17 @@ import {
   createBlankTemplate,
 } from "@/data/template"
 import {
-  type StyleDimension,
   type StyleTemplate,
+  type StyleSpec,
+  type DocumentType,
+  type Direction,
   mockExtractStyleFromFile,
   loadSavedStyleTemplates,
   saveStyleTemplates,
   createBlankStyleTemplate,
+  recommendedSpecFor,
 } from "@/data/style"
-import { SectionCard, validateSectionWordRange } from "@/components/section-card"
-import { DimensionCard } from "@/components/dimension-card"
+import { SectionCard, validateSectionWordRange, validateSectionWritingContent } from "@/components/section-card"
 import { TemplateLibraryCard } from "@/components/template-library-card"
 import { StyleLibraryCard } from "@/components/style-library-card"
 import { ConfirmDialog } from "@/components/confirm-dialog"
@@ -32,6 +35,8 @@ import {
   DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { useAppState } from "@/hooks/use-app-state"
+import type { KnowledgeFile } from "@/types"
 
 /* ------------------------------------------------------------------ */
 /*  Constants & helpers                                                */
@@ -49,12 +54,46 @@ function savePinnedIds(key: string, ids: string[]) {
   localStorage.setItem(key, JSON.stringify(ids))
 }
 
+/**
+ * Split a flat, physically-grouped section list into groups.
+ * Each group is [level-1 parent, ...its level-2 children] in array order.
+ */
+function toGroups(sections: TemplateSection[]): TemplateSection[][] {
+  const groups: TemplateSection[][] = []
+  let current: TemplateSection[] = []
+  for (const s of sections) {
+    if (s.level === 1) {
+      if (current.length) groups.push(current)
+      current = [s]
+    } else {
+      // orphan level-2 (parent removed) — treat as its own group header-less; skip safely
+      if (current.length === 0) {
+        current = [{ ...s, level: 1, parentId: null }]
+      } else {
+        current.push(s)
+      }
+    }
+  }
+  if (current.length) groups.push(current)
+  return groups
+}
+
+function fromGroups(groups: TemplateSection[][]): TemplateSection[] {
+  return groups.flat()
+}
+
+/** Reassign sequential `order` across the flat list. */
+function reindex(sections: TemplateSection[]): TemplateSection[] {
+  return sections.map((s, i) => ({ ...s, order: i }))
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
 export function TemplateLibraryView() {
   const [activeTab, setActiveTab] = useState<Tab>("structure")
+  const state = useAppState()
 
   /* ── Structure template state ── */
   const [structTemplates, setStructTemplates] = useState<WritingTemplate[]>(() => loadSavedTemplates())
@@ -102,27 +141,116 @@ export function TemplateLibraryView() {
   const structAddSection = useCallback(() => {
     setStructEditing((prev) => {
       if (!prev) return null
-      return { ...prev, sections: [...prev.sections, { id: uid(), title: "", fixedTitle: false, required: true, generationHint: "", wordCountMin: null, wordCountMax: null, order: prev.sections.length }] }
+      const section: TemplateSection = {
+        id: uid(), title: "", fixedTitle: false, required: true,
+        level: 1, parentId: null, writingMode: "prompt",
+        generationHint: "", fillTemplate: "", referenceFiles: [],
+        wordCountMin: null, wordCountMax: null, order: prev.sections.length,
+      }
+      return { ...prev, sections: [...prev.sections, section] }
+    })
+  }, [])
+
+  const structAddSubsection = useCallback((parentId: string) => {
+    setStructEditing((prev) => {
+      if (!prev) return null
+      const groups = toGroups(prev.sections)
+      const gi = groups.findIndex((g) => g[0].id === parentId)
+      if (gi < 0) return prev
+      const sub: TemplateSection = {
+        id: uid(), title: "", fixedTitle: false, required: true,
+        level: 2, parentId, writingMode: "prompt",
+        generationHint: "", fillTemplate: "", referenceFiles: [],
+        wordCountMin: null, wordCountMax: null, order: 0,
+      }
+      const group = [...groups[gi], sub]
+      const nextGroups = [...groups.slice(0, gi), group, ...groups.slice(gi + 1)]
+      return { ...prev, sections: reindex(fromGroups(nextGroups)) }
+    })
+  }, [])
+
+  const structPromoteSection = useCallback((id: string) => {
+    setStructEditing((prev) => {
+      if (!prev) return null
+      const groups = toGroups(prev.sections)
+      for (let gi = 0; gi < groups.length; gi++) {
+        const idx = groups[gi].findIndex((s) => s.id === id)
+        if (idx > 0) {
+          // remove from current group, insert as its own new group right after
+          const [promoted] = groups[gi].splice(idx, 1)
+          const newGroup: TemplateSection[] = [{ ...promoted, level: 1, parentId: null }]
+          const nextGroups = [...groups.slice(0, gi + 1), newGroup, ...groups.slice(gi + 1)]
+          return { ...prev, sections: reindex(fromGroups(nextGroups)) }
+        }
+      }
+      return prev
+    })
+  }, [])
+
+  const structDemoteSection = useCallback((id: string) => {
+    setStructEditing((prev) => {
+      if (!prev) return null
+      const groups = toGroups(prev.sections)
+      const gi = groups.findIndex((g) => g[0].id === id && g[0].level === 1)
+      // need a group below to attach to as its first sub-section
+      if (gi < 0 || gi >= groups.length - 1) return prev
+      const targetParent = groups[gi + 1][0]
+      // the whole current group (parent + its existing children) becomes children
+      // of the next group's parent, inserted right after it (i.e. as the first subs).
+      const moved: TemplateSection[] = groups[gi].map((s) => ({
+        ...s, level: 2, parentId: targetParent.id,
+      }))
+      const newTargetGroup = [groups[gi + 1][0], ...moved, ...groups[gi + 1].slice(1)]
+      const nextGroups = [...groups.slice(0, gi), newTargetGroup, ...groups.slice(gi + 2)]
+      return { ...prev, sections: reindex(fromGroups(nextGroups)) }
     })
   }, [])
 
   const structRemoveSection = useCallback((id: string) => {
     setStructEditing((prev) => {
       if (!prev) return null
-      return { ...prev, sections: prev.sections.filter((s) => s.id !== id).map((s, i) => ({ ...s, order: i })) }
+      const target = prev.sections.find((s) => s.id === id)
+      if (!target) return prev
+      let next: TemplateSection[]
+      if (target.level === 1) {
+        // remove the whole group (parent + its children)
+        next = prev.sections.filter((s) => s.id !== id && s.parentId !== id)
+      } else {
+        next = prev.sections.filter((s) => s.id !== id)
+      }
+      return { ...prev, sections: reindex(next) }
     })
   }, [])
 
   const structMoveSection = useCallback((id: string, direction: "up" | "down") => {
     setStructEditing((prev) => {
       if (!prev) return null
-      const arr = [...prev.sections]
-      const idx = arr.findIndex((s) => s.id === id)
-      if (idx < 0) return prev
-      const swapIdx = direction === "up" ? idx - 1 : idx + 1
-      if (swapIdx < 0 || swapIdx >= arr.length) return prev
-      ;[arr[idx], arr[swapIdx]] = [arr[swapIdx], arr[idx]]
-      return { ...prev, sections: arr.map((s, i) => ({ ...s, order: i })) }
+      const groups = toGroups(prev.sections)
+      // locate section
+      let gi = -1, si = -1
+      for (let i = 0; i < groups.length; i++) {
+        const j = groups[i].findIndex((s) => s.id === id)
+        if (j >= 0) { gi = i; si = j; break }
+      }
+      if (gi < 0) return prev
+
+      if (si === 0) {
+        // move whole group up/down
+        const swap = direction === "up" ? gi - 1 : gi + 1
+        if (swap < 0 || swap >= groups.length) return prev
+        const nextGroups = [...groups]
+        ;[nextGroups[gi], nextGroups[swap]] = [nextGroups[swap], nextGroups[gi]]
+        return { ...prev, sections: reindex(fromGroups(nextGroups)) }
+      } else {
+        // move sub-section within its sibling group
+        const group = groups[gi]
+        const swap = direction === "up" ? si - 1 : si + 1
+        if (swap <= 0 || swap >= group.length) return prev // can't cross the parent
+        const nextGroup = [...group]
+        ;[nextGroup[si], nextGroup[swap]] = [nextGroup[swap], nextGroup[si]]
+        const nextGroups = [...groups.slice(0, gi), nextGroup, ...groups.slice(gi + 1)]
+        return { ...prev, sections: reindex(fromGroups(nextGroups)) }
+      }
     })
   }, [])
 
@@ -215,8 +343,14 @@ export function TemplateLibraryView() {
 
   const cancelStructEdit = useCallback(() => {
     if (structSnapshot) {
+      // editing an existing template — revert to the saved snapshot, read-only
       setStructEditing(structSnapshot)
       setStructReadOnly(true)
+    } else {
+      // canceling a brand-new (unsaved) template — go back to the list
+      setStructEditing(null)
+      setStructSnapshot(null)
+      setStructReadOnly(false)
     }
   }, [structSnapshot])
 
@@ -231,43 +365,52 @@ export function TemplateLibraryView() {
     savePinnedIds("template-library-style-pinned", ids)
   }, [])
 
-  const styleUpdateDimension = useCallback((id: string, patch: Partial<StyleDimension>) => {
-    setStyleEditing((prev) =>
-      prev ? { ...prev, dimensions: prev.dimensions.map((d) => (d.id === id ? { ...d, ...patch } : d)) } : null
-    )
+  const styleUpdateSpec = useCallback((patch: Partial<StyleSpec>) => {
+    setStyleEditing((prev) => (prev ? { ...prev, styleSpec: { ...prev.styleSpec, ...patch } } : null))
   }, [])
 
-  const styleAddDimension = useCallback(() => {
+  /** One-click fill recommended spec for the chosen document type (keep user edits to other fields where present). */
+  const styleApplyRecommendedSpec = useCallback((docType: DocumentType | "") => {
+    const recommended = recommendedSpecFor(docType)
+    setStyleEditing((prev) => (prev ? { ...prev, styleSpec: { ...recommended } } : null))
+  }, [])
+
+  const styleUpdateRequirement = useCallback((index: number, value: string) => {
     setStyleEditing((prev) => {
       if (!prev) return null
-      return { ...prev, dimensions: [...prev.dimensions, { id: uid(), name: "", value: "", fixedName: false, required: true, order: prev.dimensions.length }] }
+      const next = [...prev.writingRequirements]
+      next[index] = value
+      return { ...prev, writingRequirements: next }
     })
   }, [])
 
-  const styleRemoveDimension = useCallback((id: string) => {
+  const styleAddRequirement = useCallback(() => {
+    setStyleEditing((prev) => (prev ? { ...prev, writingRequirements: [...prev.writingRequirements, ""] } : null))
+  }, [])
+
+  const styleRemoveRequirement = useCallback((index: number) => {
     setStyleEditing((prev) => {
       if (!prev) return null
-      return { ...prev, dimensions: prev.dimensions.filter((d) => d.id !== id).map((d, i) => ({ ...d, order: i })) }
+      return { ...prev, writingRequirements: prev.writingRequirements.filter((_, i) => i !== index) }
     })
   }, [])
 
-  const styleMoveDimension = useCallback((id: string, direction: "up" | "down") => {
+  const styleMoveRequirement = useCallback((index: number, direction: "up" | "down") => {
     setStyleEditing((prev) => {
       if (!prev) return null
-      const arr = [...prev.dimensions]
-      const idx = arr.findIndex((d) => d.id === id)
-      if (idx < 0) return prev
-      const swapIdx = direction === "up" ? idx - 1 : idx + 1
-      if (swapIdx < 0 || swapIdx >= arr.length) return prev
-      ;[arr[idx], arr[swapIdx]] = [arr[swapIdx], arr[idx]]
-      return { ...prev, dimensions: arr.map((d, i) => ({ ...d, order: i })) }
+      const arr = [...prev.writingRequirements]
+      const swap = direction === "up" ? index - 1 : index + 1
+      if (swap < 0 || swap >= arr.length) return prev
+      ;[arr[index], arr[swap]] = [arr[swap], arr[index]]
+      return { ...prev, writingRequirements: arr }
     })
   }, [])
 
   const handleStyleSave = useCallback(() => {
     if (!styleEditing) return
     const now = new Date().toISOString()
-    const updated = { ...styleEditing, updatedAt: now }
+    // drop empty requirement items on save
+    const updated = { ...styleEditing, writingRequirements: styleEditing.writingRequirements.map((r) => r.trim()).filter(Boolean), updatedAt: now }
     const exists = styleTemplates.some((t) => t.id === updated.id)
     if (exists) {
       persistStyle(styleTemplates.map((t) => (t.id === updated.id ? updated : t)))
@@ -352,8 +495,14 @@ export function TemplateLibraryView() {
 
   const cancelStyleEdit = useCallback(() => {
     if (styleSnapshot) {
+      // editing an existing template — revert to the saved snapshot, read-only
       setStyleEditing(styleSnapshot)
       setStyleReadOnly(true)
+    } else {
+      // canceling a brand-new (unsaved) template — go back to the list
+      setStyleEditing(null)
+      setStyleSnapshot(null)
+      setStyleReadOnly(false)
     }
   }, [styleSnapshot])
 
@@ -427,8 +576,12 @@ export function TemplateLibraryView() {
             onUpdateTemplate={setStructEditing}
             onUpdateSection={structUpdateSection}
             onAddSection={structAddSection}
+            onAddSubsection={structAddSubsection}
+            onPromoteSection={structPromoteSection}
+            onDemoteSection={structDemoteSection}
             onRemoveSection={structRemoveSection}
             onMoveSection={structMoveSection}
+            knowledgeFiles={state.files}
             onSave={handleStructSave}
             onSaveAsNew={() => { setStructSaveAsNewName(structEditing.name ? `${structEditing.name} (副本)` : "未命名模板"); setStructSaveAsNewOpen(true) }}
             onBack={() => { setStructEditing(null); setStructSnapshot(null); setStructReadOnly(false) }}
@@ -462,10 +615,12 @@ export function TemplateLibraryView() {
             readOnly={styleReadOnly}
             isPreset={styleEditing.id.startsWith("preset-")}
             onUpdateTemplate={setStyleEditing}
-            onUpdateDimension={styleUpdateDimension}
-            onAddDimension={styleAddDimension}
-            onRemoveDimension={styleRemoveDimension}
-            onMoveDimension={styleMoveDimension}
+            onUpdateSpec={styleUpdateSpec}
+            onApplyRecommendedSpec={styleApplyRecommendedSpec}
+            onUpdateRequirement={styleUpdateRequirement}
+            onAddRequirement={styleAddRequirement}
+            onRemoveRequirement={styleRemoveRequirement}
+            onMoveRequirement={styleMoveRequirement}
             onSave={handleStyleSave}
             onSaveAsNew={() => { setStyleSaveAsNewName(styleEditing.name ? `${styleEditing.name} (副本)` : "未命名模板"); setStyleSaveAsNewOpen(true) }}
             onBack={() => { setStyleEditing(null); setStyleSnapshot(null); setStyleReadOnly(false) }}
@@ -746,8 +901,12 @@ function StructureEditPanel({
   onUpdateTemplate,
   onUpdateSection,
   onAddSection,
+  onAddSubsection,
+  onPromoteSection,
+  onDemoteSection,
   onRemoveSection,
   onMoveSection,
+  knowledgeFiles = [],
   onSave,
   onSaveAsNew,
   onBack,
@@ -761,8 +920,12 @@ function StructureEditPanel({
   onUpdateTemplate: (t: WritingTemplate) => void
   onUpdateSection: (id: string, patch: Partial<TemplateSection>) => void
   onAddSection: () => void
+  onAddSubsection?: (parentId: string) => void
+  onPromoteSection?: (id: string) => void
+  onDemoteSection?: (id: string) => void
   onRemoveSection: (id: string) => void
   onMoveSection: (id: string, direction: "up" | "down") => void
+  knowledgeFiles?: KnowledgeFile[]
   onSave: () => void
   onSaveAsNew: () => void
   onBack: () => void
@@ -770,7 +933,7 @@ function StructureEditPanel({
   onCancelEdit?: () => void
   canSaveAsNew: boolean
 }) {
-  const canSave = !readOnly && template.name.trim().length > 0 && template.sections.length > 0 && template.sections.every((s) => s.title.trim().length > 0) && template.sections.every(validateSectionWordRange)
+  const canSave = !readOnly && template.name.trim().length > 0 && template.sections.length > 0 && template.sections.every((s) => s.title.trim().length > 0) && template.sections.every(validateSectionWordRange) && template.sections.every(validateSectionWritingContent)
 
   return (
     <div className="bg-white/80 border border-line rounded-2xl p-6">
@@ -822,7 +985,9 @@ function StructureEditPanel({
       </div>
 
       <div className="mb-5">
-        <label className="block text-xs font-[620] text-muted-text mb-1.5">模板名称</label>
+        <label className="block text-xs font-[620] text-muted-text mb-1.5">
+          模板名称<span className="text-accent-deep ml-0.5" aria-hidden>*</span>
+        </label>
         {readOnly ? (
           <p className="h-9 px-4 flex items-center text-sm font-[620] text-foreground">{template.name}</p>
         ) : (
@@ -835,8 +1000,7 @@ function StructureEditPanel({
               "w-full h-9 px-4 border border-line rounded-4xl text-sm",
               "bg-white/60 text-foreground placeholder:text-subtle",
               "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
-              "transition-[border-color,box-shadow] duration-150",
-              template.name.trim().length === 0 && "border-destructive"
+              "transition-[border-color,box-shadow] duration-150"
             )}
           />
         )}
@@ -846,18 +1010,46 @@ function StructureEditPanel({
         <div className="py-6 text-center text-muted-text text-sm">{readOnly ? "该模板暂无章节" : "请添加至少一个章节"}</div>
       ) : (
         <div className="space-y-3 mb-4">
-          {template.sections.map((section, idx) => (
-            <SectionCard
-              key={section.id}
-              section={section}
-              index={idx}
-              total={template.sections.length}
-              readOnly={readOnly}
-              onUpdate={onUpdateSection}
-              onRemove={onRemoveSection}
-              onMove={onMoveSection}
-            />
-          ))}
+          {(() => {
+            const groups = toGroups(template.sections)
+            return groups.map((group, gi) => {
+              const parent = group[0]
+              const children = group.slice(1)
+              return (
+                <div key={parent.id} className="space-y-2">
+                  <SectionCard
+                    section={parent}
+                    numberLabel={`${gi + 1}`}
+                    canMoveUp={gi > 0}
+                    canMoveDown={gi < groups.length - 1}
+                    canDemote={gi < groups.length - 1}
+                    readOnly={readOnly}
+                    onUpdate={onUpdateSection}
+                    onRemove={onRemoveSection}
+                    onMove={onMoveSection}
+                    onAddSubsection={onAddSubsection}
+                    onDemoteSection={onDemoteSection}
+                    knowledgeFiles={knowledgeFiles}
+                  />
+                  {children.map((child, ci) => (
+                    <SectionCard
+                      key={child.id}
+                      section={child}
+                      numberLabel={`${gi + 1}.${ci + 1}`}
+                      canMoveUp={ci > 0}
+                      canMoveDown={ci < children.length - 1}
+                      readOnly={readOnly}
+                      onUpdate={onUpdateSection}
+                      onRemove={onRemoveSection}
+                      onMove={onMoveSection}
+                      onPromoteSection={onPromoteSection}
+                      knowledgeFiles={knowledgeFiles}
+                    />
+                  ))}
+                </div>
+              )
+            })
+          })()}
         </div>
       )}
 
@@ -990,15 +1182,126 @@ function StyleBrowsePanel({
 /*  Style edit panel                                                  */
 /* ================================================================== */
 
+const DOCUMENT_TYPE_OPTIONS: DocumentType[] = [
+  "通知", "请示", "报告", "批复", "函", "纪要", "通报", "讲话", "简报", "调研报告", "工作总结", "其他",
+]
+const DIRECTION_OPTIONS: Direction[] = ["上行", "下行", "平行", "对内", "对外"]
+
+function SpecField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-[11px] font-[620] text-muted-text mb-1">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+function SpecInputField({
+  label, value, placeholder = "", readOnly, onChange,
+}: {
+  label: string
+  value: string
+  placeholder?: string
+  readOnly?: boolean
+  onChange: (v: string) => void
+}) {
+  return (
+    <SpecField label={label}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={readOnly}
+        className={cn(
+          "w-full h-9 px-3 border border-line rounded-lg text-sm",
+          "bg-white/60 text-foreground placeholder:text-subtle",
+          "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
+          "transition-[border-color,box-shadow] duration-150",
+          readOnly && "bg-muted/30 cursor-not-allowed"
+        )}
+      />
+    </SpecField>
+  )
+}
+
+function RequirementItem({
+  index, value, total, readOnly, onChange, onRemove, onMove,
+}: {
+  index: number
+  value: string
+  total: number
+  readOnly?: boolean
+  onChange: (v: string) => void
+  onRemove: () => void
+  onMove: (dir: "up" | "down") => void
+}) {
+  return (
+    <div className="flex items-center gap-2 bg-white/60 border border-line rounded-xl p-2">
+      <div className="flex flex-col gap-0.5">
+        <button
+          type="button"
+          disabled={readOnly || index === 0}
+          onClick={() => onMove("up")}
+          className={cn(
+            "w-6 h-6 rounded-md border border-line bg-white/60 hover:bg-white/80 grid place-items-center transition-[background,opacity] duration-150",
+            readOnly || index === 0 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
+          )}
+        >
+          <ChevronUp className="w-3 h-3" />
+        </button>
+        <button
+          type="button"
+          disabled={readOnly || index === total - 1}
+          onClick={() => onMove("down")}
+          className={cn(
+            "w-6 h-6 rounded-md border border-line bg-white/60 hover:bg-white/80 grid place-items-center transition-[background,opacity] duration-150",
+            readOnly || index === total - 1 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
+          )}
+        >
+          <ChevronDown className="w-3 h-3" />
+        </button>
+      </div>
+      <span className="text-xs font-[680] text-muted-text w-5 text-center flex-none">{index + 1}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="如：善用排比句式增强气势"
+        disabled={readOnly}
+        className={cn(
+          "flex-1 min-w-0 h-8 px-3 border border-line rounded-lg text-sm",
+          "bg-white/60 text-foreground placeholder:text-subtle",
+          "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
+          "transition-[border-color,box-shadow] duration-150",
+          readOnly && "bg-muted/30 cursor-not-allowed"
+        )}
+      />
+      {!readOnly && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="w-7 h-7 rounded-lg grid place-items-center text-muted-text hover:text-accent-deep hover:bg-white/60 cursor-pointer transition-[color,background] duration-150 flex-none"
+          title="删除此要求"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  )
+}
+
 function StyleEditPanel({
   template,
   readOnly = false,
   isPreset = false,
   onUpdateTemplate,
-  onUpdateDimension,
-  onAddDimension,
-  onRemoveDimension,
-  onMoveDimension,
+  onUpdateSpec,
+  onApplyRecommendedSpec,
+  onUpdateRequirement,
+  onAddRequirement,
+  onRemoveRequirement,
+  onMoveRequirement,
   onSave,
   onSaveAsNew,
   onBack,
@@ -1010,10 +1313,12 @@ function StyleEditPanel({
   readOnly?: boolean
   isPreset?: boolean
   onUpdateTemplate: (t: StyleTemplate) => void
-  onUpdateDimension: (id: string, patch: Partial<StyleDimension>) => void
-  onAddDimension: () => void
-  onRemoveDimension: (id: string) => void
-  onMoveDimension: (id: string, direction: "up" | "down") => void
+  onUpdateSpec: (patch: Partial<StyleSpec>) => void
+  onApplyRecommendedSpec: (docType: DocumentType | "") => void
+  onUpdateRequirement: (index: number, value: string) => void
+  onAddRequirement: () => void
+  onRemoveRequirement: (index: number) => void
+  onMoveRequirement: (index: number, direction: "up" | "down") => void
   onSave: () => void
   onSaveAsNew: () => void
   onBack: () => void
@@ -1021,7 +1326,8 @@ function StyleEditPanel({
   onCancelEdit?: () => void
   canSaveAsNew: boolean
 }) {
-  const canSave = !readOnly && template.name.trim().length > 0 && template.dimensions.length > 0 && template.dimensions.every((d) => d.name.trim().length > 0 && d.value.trim().length > 0)
+  const canSave = !readOnly && template.name.trim().length > 0
+  const spec = template.styleSpec
 
   return (
     <div className="bg-white/80 border border-line rounded-2xl p-6">
@@ -1073,7 +1379,9 @@ function StyleEditPanel({
       </div>
 
       <div className="mb-5">
-        <label className="block text-xs font-[620] text-muted-text mb-1.5">模板名称</label>
+        <label className="block text-xs font-[620] text-muted-text mb-1.5">
+          模板名称<span className="text-accent-deep ml-0.5" aria-hidden>*</span>
+        </label>
         {readOnly ? (
           <p className="h-9 px-4 flex items-center text-sm font-[620] text-foreground">{template.name}</p>
         ) : (
@@ -1086,58 +1394,90 @@ function StyleEditPanel({
               "w-full h-9 px-4 border border-line rounded-4xl text-sm",
               "bg-white/60 text-foreground placeholder:text-subtle",
               "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
-              "transition-[border-color,box-shadow] duration-150",
-              template.name.trim().length === 0 && "border-destructive"
+              "transition-[border-color,box-shadow] duration-150"
             )}
           />
         )}
       </div>
 
-      {template.dimensions.length === 0 ? (
-        <div className="py-6 text-center text-muted-text text-sm">{readOnly ? "该模板暂无维度" : "请添加至少一个风格维度"}</div>
-      ) : (
-        <div className="space-y-3 mb-4">
-          {template.dimensions.map((dim, idx) => (
-            <DimensionCard
-              key={dim.id}
-              dimension={dim}
-              index={idx}
-              total={template.dimensions.length}
-              readOnly={readOnly}
-              onUpdate={onUpdateDimension}
-              onRemove={onRemoveDimension}
-              onMove={onMoveDimension}
-            />
-          ))}
-        </div>
-      )}
-
-      {!readOnly && (
-        <button
-          type="button"
-          onClick={onAddDimension}
-          className="flex items-center gap-1.5 text-sm font-[620] text-accent-deep cursor-pointer hover:underline mb-5"
-        >
-          <Plus className="w-4 h-4" /> 添加维度
-        </button>
-      )}
-
+      {/* ---- 公文规格表 ---- */}
       <div className="mb-5">
-        <label className="block text-xs font-[620] text-muted-text mb-1.5">风格补充说明</label>
-        {readOnly ? (
-          <p className="min-h-[60px] px-4 py-3 text-sm leading-relaxed text-foreground">{template.styleNote || "无"}</p>
+        <label className="block text-xs font-[620] text-muted-text mb-2">公文规格</label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* 文种 — 选择后自动带出推荐规格 */}
+          <SpecField label="文种">
+            <select
+              value={spec.documentType}
+              onChange={(e) => onApplyRecommendedSpec(e.target.value as DocumentType | "")}
+              disabled={readOnly}
+              className={cn(
+                "w-full h-9 px-3 border border-line rounded-lg text-sm bg-white/60 text-foreground",
+                "focus:outline-none focus:border-[rgba(200,60,78,0.36)] transition-[border-color] duration-150",
+                readOnly && "bg-muted/30 cursor-not-allowed"
+              )}
+            >
+              <option value="">请选择</option>
+              {DOCUMENT_TYPE_OPTIONS.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </SpecField>
+          {/* 行文方向 */}
+          <SpecField label="行文方向">
+            <select
+              value={spec.direction}
+              onChange={(e) => onUpdateSpec({ direction: e.target.value as Direction | "" })}
+              disabled={readOnly}
+              className={cn(
+                "w-full h-9 px-3 border border-line rounded-lg text-sm bg-white/60 text-foreground",
+                "focus:outline-none focus:border-[rgba(200,60,78,0.36)] transition-[border-color] duration-150",
+                readOnly && "bg-muted/30 cursor-not-allowed"
+              )}
+            >
+              <option value="">请选择</option>
+              {DIRECTION_OPTIONS.map((d) => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </SpecField>
+          <SpecInputField label="受众对象" value={spec.audience} readOnly={readOnly} onChange={(v) => onUpdateSpec({ audience: v })} />
+          <SpecInputField label="语气" value={spec.tone} readOnly={readOnly} onChange={(v) => onUpdateSpec({ tone: v })} />
+          <SpecInputField label="人称偏好" value={spec.person} readOnly={readOnly} onChange={(v) => onUpdateSpec({ person: v })} />
+          <SpecInputField label="句式" value={spec.sentenceStyle} readOnly={readOnly} onChange={(v) => onUpdateSpec({ sentenceStyle: v })} />
+          <SpecInputField label="用词" value={spec.diction} readOnly={readOnly} onChange={(v) => onUpdateSpec({ diction: v })} />
+          <SpecInputField label="篇幅节奏" value={spec.lengthRhythm} readOnly={readOnly} onChange={(v) => onUpdateSpec({ lengthRhythm: v })} />
+        </div>
+      </div>
+
+      {/* ---- 写作要求条目 ---- */}
+      <div className="mb-5">
+        <label className="block text-xs font-[620] text-muted-text mb-2">写作要求</label>
+        {template.writingRequirements.length === 0 ? (
+          readOnly ? <p className="text-sm text-muted-text">暂无写作要求</p> : null
         ) : (
-          <textarea
-            value={template.styleNote}
-            onChange={(e) => onUpdateTemplate({ ...template, styleNote: e.target.value })}
-            placeholder="描述整体风格特征、表达习惯等..."
-            className={cn(
-              "w-full min-h-[100px] border border-line rounded-xl p-4 text-sm leading-relaxed",
-              "bg-white/60 text-foreground placeholder:text-subtle",
-              "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
-              "transition-[border-color,box-shadow] duration-150 resize-y"
-            )}
-          />
+          <div className="space-y-2 mb-2">
+            {template.writingRequirements.map((req, idx) => (
+              <RequirementItem
+                key={idx}
+                index={idx}
+                value={req}
+                total={template.writingRequirements.length}
+                readOnly={readOnly}
+                onChange={(v) => onUpdateRequirement(idx, v)}
+                onRemove={() => onRemoveRequirement(idx)}
+                onMove={(dir) => onMoveRequirement(idx, dir)}
+              />
+            ))}
+          </div>
+        )}
+        {!readOnly && (
+          <button
+            type="button"
+            onClick={onAddRequirement}
+            className="flex items-center gap-1.5 text-sm font-[620] text-accent-deep cursor-pointer hover:underline"
+          >
+            <Plus className="w-4 h-4" /> 添加写作要求
+          </button>
         )}
       </div>
 

@@ -89,8 +89,8 @@ export interface KnowledgeFile {
   date?: string
 }
 
-export type { TemplateSection, WritingTemplate } from "@/data/template"
-export type { StyleDimension, StyleTemplate } from "@/data/style"
+export type { TemplateSection, WritingTemplate, SectionWritingMode } from "@/data/template"
+export type { StyleDimension, StyleTemplate, StyleSpec, DocumentType, Direction } from "@/data/style"
 export type { RefOverview, RefMaterial, WritingMode } from "@/data/ref"
 
 export interface ViewMeta {

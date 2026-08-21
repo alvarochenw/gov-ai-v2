@@ -83,8 +83,15 @@ export function StyleLibraryCard({
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <span className="text-xs text-muted-text">
-              {template.dimensions.length} 个维度
+              {template.styleSpec.documentType || template.styleSpec.direction
+                ? `${template.styleSpec.documentType || "自定义"}${template.styleSpec.direction ? " · " + template.styleSpec.direction : ""}`
+                : "自定义风格"}
             </span>
+            {template.writingRequirements.length > 0 && (
+              <span className="text-[10px] text-subtle flex-none">
+                {template.writingRequirements.length} 条要求
+              </span>
+            )}
             <span className={cn(
               "text-[9px] font-[660] px-1.5 py-0.5 rounded flex-none",
               isPreset ? "bg-primary/10 text-primary" : "bg-accent-soft text-accent-deep"
