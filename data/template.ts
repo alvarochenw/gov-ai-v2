@@ -4,6 +4,9 @@
 
 import type { ReferenceFile } from "@/lib/template-data"
 
+/** Max number of templates (presets + custom) kept in the library. */
+export const MAX_TEMPLATES = 10
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
 /* ------------------------------------------------------------------ */
@@ -55,18 +58,75 @@ export interface WritingTemplate {
 
 const uid = () => crypto.randomUUID()
 
-/** Build a full TemplateSection from a raw definition that omits the new (level/mode/fill/refs) fields. */
+/** Build a full TemplateSection from a raw definition. The structural fields
+ *  (level / parentId / writingMode / fillTemplate / referenceFiles) are optional
+ *  and fall back to level-1 prompt-mode defaults when omitted — so a preset can
+ *  mix prompt-mode top-level headings with fill-mode sub-headings. */
 type DefSection = Omit<TemplateSection, "level" | "parentId" | "writingMode" | "fillTemplate" | "referenceFiles">
+  & Partial<Pick<TemplateSection, "level" | "parentId" | "writingMode" | "fillTemplate" | "referenceFiles">>
 const def = (s: DefSection): TemplateSection => ({
-  ...s,
   level: 1,
   parentId: null,
   writingMode: "prompt",
   fillTemplate: "",
   referenceFiles: [],
+  ...s,
 })
 
 type RawTemplate = Omit<WritingTemplate, "sections"> & { sections: DefSection[] }
+
+/* "每周警务工作总结" — written in a local 派出所 (police station) voice.
+ *  Mixes prompt-mode headings with fill-mode sub-headings that carry example
+ *  text + {{placeholders}}. Defined separately so the level-2 sections can
+ *  reference their parent's id. */
+const weeklyPolicePatrolId = uid()
+const weeklyPoliceSummarySections: DefSection[] = [
+  {
+    id: uid(), title: "一、本周警务概况", fixedTitle: true, required: true,
+    generationHint: "以派出所名义概述本周（起止日期）辖区社会治安总体形势，包括接处警总量、刑事/治安警情升降幅度和辖区稳定基本评价，语言简练客观。",
+    wordCountMin: 150, wordCountMax: 350, order: 0,
+  },
+  {
+    id: uid(), title: "二、接处警与案件办理", fixedTitle: true, required: true,
+    writingMode: "fill", generationHint: "",
+    fillTemplate: "本周我所共接处警{{接处警总数}}起，其中刑事警情{{刑事警情数}}起、治安警情{{治安警情数}}起、群众求助{{求助警情数}}起。立刑事案件{{刑事立案数}}起、受理治安案件{{治安立案数}}起，破获刑事案件{{破案数}}起、查处治安案件{{查处数}}起，抓获违法犯罪嫌疑人{{抓获人数}}名。重点办结{{重点案件名称}}等案件，{{案件办理结果}}。",
+    wordCountMin: 200, wordCountMax: 500, order: 1,
+  },
+  {
+    id: weeklyPolicePatrolId, title: "三、巡逻防控与社区警务", fixedTitle: true, required: true,
+    generationHint: "总述本周辖区巡逻防控和社区警务工作开展情况，作为下文两个二级标题的引述，简明概括投入警力和总体成效。",
+    wordCountMin: 80, wordCountMax: 200, order: 2,
+  },
+  {
+    id: uid(), title: "（一）巡逻防控", fixedTitle: true, required: true,
+    level: 2, parentId: weeklyPolicePatrolId, writingMode: "fill", generationHint: "",
+    fillTemplate: "本周累计投入巡逻警力{{巡逻警力数}}人次、警车{{巡逻车次}}车次，对{{重点巡逻区域}}开展步巡与车巡相结合的巡防工作，盘查可疑人员{{盘查人数}}人、可疑车辆{{盘查车辆数}}辆，现场抓获现行违法人员{{现场抓获数}}名，辖区可防性案件较上周{{升降幅情况}}。",
+    wordCountMin: 150, wordCountMax: 400, order: 3,
+  },
+  {
+    id: uid(), title: "（二）社区警务", fixedTitle: true, required: true,
+    level: 2, parentId: weeklyPolicePatrolId, writingMode: "fill", generationHint: "",
+    fillTemplate: "社区民警本周走访辖区群众{{走访户数}}户、行业场所{{检查场所数}}家，排查化解矛盾纠纷{{化解纠纷数}}起，开展防范宣传{{宣传活动场次}}场次，覆盖群众{{宣传覆盖人数}}人；落实对{{重点管控对象类别}}的动态管控，辖区{{管控情况}}稳定可控。",
+    wordCountMin: 150, wordCountMax: 400, order: 4,
+  },
+  {
+    id: uid(), title: "四、户籍窗口服务", fixedTitle: true, required: false,
+    writingMode: "fill", generationHint: "",
+    fillTemplate: "本周户籍窗口受理户籍业务{{户籍业务件数}}件、身份证办理{{身份证件数}}件，接待群众咨询{{咨询人次}}人次，发放证件{{发证数}}件，群众满意度{{满意度}}，未发生有效投诉。",
+    wordCountMin: 80, wordCountMax: 250, order: 5,
+  },
+  {
+    id: uid(), title: "五、存在不足", fixedTitle: true, required: false,
+    generationHint: "以派出所自查视角分析本周警务工作中存在的薄弱环节和不足，如接处警响应、案件办理质效、巡防覆盖面、队伍管理等方面，简述原因。",
+    wordCountMin: 100, wordCountMax: 300, order: 6,
+  },
+  {
+    id: uid(), title: "六、下周工作安排", fixedTitle: true, required: true,
+    writingMode: "fill", generationHint: "",
+    fillTemplate: "下周我所重点抓好以下工作：一是{{工作重点一}}；二是{{工作重点二}}；三是{{工作重点三}}。由{{责任警务区或民警}}牵头，于{{时限要求}}前落实到位，并及时向所领导报告进展。",
+    wordCountMin: 150, wordCountMax: 400, order: 7,
+  },
+]
 
 const rawPresetTemplates: RawTemplate[] = [
   {
@@ -141,6 +201,14 @@ const rawPresetTemplates: RawTemplate[] = [
         generationHint: "提出下一步工作思路和重点安排", wordCountMin: 200, wordCountMax: 500, order: 4,
       },
     ],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: "preset-weekly-police-summary",
+    name: "每周警务工作总结",
+    source: "custom",
+    sections: weeklyPoliceSummarySections,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
@@ -223,10 +291,13 @@ export function loadSavedTemplates(): WritingTemplate[] {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return [...presetTemplates]
     const userSaved: WritingTemplate[] = JSON.parse(raw)
-    // Merge: presets are always present; user-saved override by id
+    // 先放代码版预设为基底,再用 localStorage 的项覆盖(含 preset- —— 后台修改的预设
+    // 会覆盖代码版);非预设自定义项也覆盖。这样系统后台对预设的修改能生效。
     const map = new Map<string, WritingTemplate>()
     for (const t of presetTemplates) map.set(t.id, t)
-    for (const t of userSaved) map.set(t.id, { ...t, sections: t.sections.map(normalizeSection) })
+    for (const t of userSaved) {
+      map.set(t.id, { ...t, sections: t.sections.map(normalizeSection) })
+    }
     return Array.from(map.values())
   } catch {
     return [...presetTemplates]

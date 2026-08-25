@@ -4,16 +4,18 @@ import { useState, useCallback } from "react"
 import {
   LayoutGrid, Palette, Plus, Upload, FileText,
   ArrowLeft, Save, Copy, Loader2, X, Pencil,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
   type TemplateSection,
   type WritingTemplate,
+  type SectionWritingMode,
   mockExtractFromFile,
   loadSavedTemplates,
   saveTemplates,
   createBlankTemplate,
+  MAX_TEMPLATES,
 } from "@/data/template"
 import {
   type StyleTemplate,
@@ -27,23 +29,25 @@ import {
   recommendedSpecFor,
 } from "@/data/style"
 import { SectionCard, validateSectionWordRange, validateSectionWritingContent } from "@/components/section-card"
+import {
+  toGroups, fromGroups, reindex,
+} from "@/lib/template-section-ops"
 import { TemplateLibraryCard } from "@/components/template-library-card"
 import { StyleLibraryCard } from "@/components/style-library-card"
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import { ExtractTemplateDialog } from "@/components/extract-template-dialog"
+import { useAppState } from "@/hooks/use-app-state"
 import {
   Dialog, DialogClose, DialogContent, DialogHeader,
   DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
-import { useAppState } from "@/hooks/use-app-state"
-import type { KnowledgeFile } from "@/types"
 
 /* ------------------------------------------------------------------ */
 /*  Constants & helpers                                                */
 /* ------------------------------------------------------------------ */
 
 type Tab = "structure" | "style"
-const MAX_TEMPLATES = 10
 const MAX_PINNED = 3
 const uid = () => crypto.randomUUID()
 
@@ -54,38 +58,7 @@ function savePinnedIds(key: string, ids: string[]) {
   localStorage.setItem(key, JSON.stringify(ids))
 }
 
-/**
- * Split a flat, physically-grouped section list into groups.
- * Each group is [level-1 parent, ...its level-2 children] in array order.
- */
-function toGroups(sections: TemplateSection[]): TemplateSection[][] {
-  const groups: TemplateSection[][] = []
-  let current: TemplateSection[] = []
-  for (const s of sections) {
-    if (s.level === 1) {
-      if (current.length) groups.push(current)
-      current = [s]
-    } else {
-      // orphan level-2 (parent removed) — treat as its own group header-less; skip safely
-      if (current.length === 0) {
-        current = [{ ...s, level: 1, parentId: null }]
-      } else {
-        current.push(s)
-      }
-    }
-  }
-  if (current.length) groups.push(current)
-  return groups
-}
-
-function fromGroups(groups: TemplateSection[][]): TemplateSection[] {
-  return groups.flat()
-}
-
-/** Reassign sequential `order` across the flat list. */
-function reindex(sections: TemplateSection[]): TemplateSection[] {
-  return sections.map((s, i) => ({ ...s, order: i }))
-}
+/* toGroups / fromGroups / reindex 及 section 操作函数抽至 lib/template-section-ops.ts */
 
 /* ------------------------------------------------------------------ */
 /*  Main component                                                     */
@@ -93,7 +66,7 @@ function reindex(sections: TemplateSection[]): TemplateSection[] {
 
 export function TemplateLibraryView() {
   const [activeTab, setActiveTab] = useState<Tab>("structure")
-  const state = useAppState()
+  const { files: knowledgeFiles } = useAppState()
 
   /* ── Structure template state ── */
   const [structTemplates, setStructTemplates] = useState<WritingTemplate[]>(() => loadSavedTemplates())
@@ -103,6 +76,8 @@ export function TemplateLibraryView() {
   const [structSnapshot, setStructSnapshot] = useState<WritingTemplate | null>(null)
   const [structUploadName, setStructUploadName] = useState<string | null>(null)
   const [structExtracting, setStructExtracting] = useState(false)
+  const [structExtractError, setStructExtractError] = useState<string | null>(null)
+  const [structExtractDialogOpen, setStructExtractDialogOpen] = useState(false)
   const [structDeleteTarget, setStructDeleteTarget] = useState<WritingTemplate | null>(null)
   const [structSearch, setStructSearch] = useState("")
   const [structSaveAsNewOpen, setStructSaveAsNewOpen] = useState(false)
@@ -116,6 +91,8 @@ export function TemplateLibraryView() {
   const [styleSnapshot, setStyleSnapshot] = useState<StyleTemplate | null>(null)
   const [styleUploadName, setStyleUploadName] = useState<string | null>(null)
   const [styleExtracting, setStyleExtracting] = useState(false)
+  const [styleExtractError, setStyleExtractError] = useState<string | null>(null)
+  const [styleExtractDialogOpen, setStyleExtractDialogOpen] = useState(false)
   const [styleDeleteTarget, setStyleDeleteTarget] = useState<StyleTemplate | null>(null)
   const [styleSearch, setStyleSearch] = useState("")
   const [styleSaveAsNewOpen, setStyleSaveAsNewOpen] = useState(false)
@@ -298,19 +275,56 @@ export function TemplateLibraryView() {
     setStructDeleteTarget(null)
   }, [structDeleteTarget, structTemplates, structEditing, persistStruct, structPinnedIds, persistStructPinned])
 
-  const handleStructExtract = useCallback(async () => {
-    if (!structUploadName) return
+  const handleStructExtract = useCallback(async (file: File, mode: SectionWritingMode) => {
+    const fileName = file.name
     setStructExtracting(true)
+    setStructExtractError(null)
+    setStructUploadName(fileName)
     try {
-      const template = await mockExtractFromFile(structUploadName)
+      let template: WritingTemplate
+      // .docx 走真解析;其他格式(.txt/.pdf)回退 mock
+      if (fileName.toLowerCase().endsWith(".docx")) {
+        const { extractDocxText } = await import("@/lib/parse-docx")
+        const { extractTemplateFromText } = await import("@/lib/extract-template-from-text")
+        const { llmExtractTemplate, LLMNotConfiguredError } = await import("@/lib/llm-extract-template")
+        const text = await extractDocxText(file)
+        // 优先 LLM 语义提取(按 mode 产出 hint 或原文片段+占位符);失败时静默回退正则
+        let fromLLM = false
+        try {
+          template = await llmExtractTemplate(text, fileName, mode)
+          fromLLM = true
+        } catch (err) {
+          if (!(err instanceof LLMNotConfiguredError)) {
+            // 已配置但失败(网络/解析),记录便于排查,静默回退
+            console.warn("[模板提取] LLM 失败,回退正则提取:", err instanceof Error ? err.message : err)
+          }
+          template = extractTemplateFromText(text, fileName)
+        }
+        // LLM 成功时 sections 已按 mode 设好;回退正则时,正则是 prompt 模式,
+        // 若用户选 fill 模式,需把 hint 文本作为 fillTemplate 初始内容(无占位符,但至少有原文摘要)。
+        if (!fromLLM && mode === "fill") {
+          template = {
+            ...template,
+            sections: template.sections.map((s) => ({
+              ...s,
+              writingMode: "fill" as const,
+              fillTemplate: s.fillTemplate?.trim() || s.generationHint || "",
+            })),
+          }
+        }
+      } else {
+        template = await mockExtractFromFile(fileName)
+      }
       setStructEditing(template)
       setStructSnapshot(null)
       setStructReadOnly(false)
       setStructUploadName(null)
+    } catch (err) {
+      setStructExtractError(err instanceof Error ? err.message : "提取失败,请检查文件格式")
     } finally {
       setStructExtracting(false)
     }
-  }, [structUploadName])
+  }, [])
 
   const handleStructCopy = useCallback((template: WritingTemplate) => {
     if (structTemplates.length >= MAX_TEMPLATES) return
@@ -450,19 +464,40 @@ export function TemplateLibraryView() {
     setStyleDeleteTarget(null)
   }, [styleDeleteTarget, styleTemplates, styleEditing, persistStyle, stylePinnedIds, persistStylePinned])
 
-  const handleStyleExtract = useCallback(async () => {
-    if (!styleUploadName) return
+  const handleStyleExtract = useCallback(async (file: File) => {
+    const fileName = file.name
     setStyleExtracting(true)
+    setStyleExtractError(null)
+    setStyleUploadName(fileName)
     try {
-      const template = await mockExtractStyleFromFile(styleUploadName)
+      let template: StyleTemplate
+      if (fileName.toLowerCase().endsWith(".docx")) {
+        const { extractDocxText } = await import("@/lib/parse-docx")
+        const { llmExtractStyle, LLMStyleNotConfiguredError } = await import("@/lib/llm-extract-style")
+        const text = await extractDocxText(file)
+        // 优先 LLM 风格提取;未配置或失败时静默回退 mock
+        try {
+          template = await llmExtractStyle(text, fileName)
+        } catch (err) {
+          if (!(err instanceof LLMStyleNotConfiguredError)) {
+            console.warn("[风格提取] LLM 失败,回退 mock:", err instanceof Error ? err.message : err)
+          }
+          template = await mockExtractStyleFromFile(fileName)
+        }
+      } else {
+        // .txt/.pdf 等无真实文本可提取,回退 mock
+        template = await mockExtractStyleFromFile(fileName)
+      }
       setStyleEditing(template)
       setStyleSnapshot(null)
       setStyleReadOnly(false)
       setStyleUploadName(null)
+    } catch (err) {
+      setStyleExtractError(err instanceof Error ? err.message : "提取失败,请检查文件格式")
     } finally {
       setStyleExtracting(false)
     }
-  }, [styleUploadName])
+  }, [])
 
   const handleStyleCopy = useCallback((template: StyleTemplate) => {
     if (styleTemplates.length >= MAX_TEMPLATES) return
@@ -581,7 +616,6 @@ export function TemplateLibraryView() {
             onDemoteSection={structDemoteSection}
             onRemoveSection={structRemoveSection}
             onMoveSection={structMoveSection}
-            knowledgeFiles={state.files}
             onSave={handleStructSave}
             onSaveAsNew={() => { setStructSaveAsNewName(structEditing.name ? `${structEditing.name} (副本)` : "未命名模板"); setStructSaveAsNewOpen(true) }}
             onBack={() => { setStructEditing(null); setStructSnapshot(null); setStructReadOnly(false) }}
@@ -590,6 +624,7 @@ export function TemplateLibraryView() {
             canSaveAsNew={structTemplates.length < MAX_TEMPLATES}
           />
         ) : (
+          <>
           <StructureBrowsePanel
             templates={filteredStruct}
             totalCount={structTemplates.length}
@@ -598,8 +633,26 @@ export function TemplateLibraryView() {
             onSearch={setStructSearch}
             uploadName={structUploadName}
             onUploadName={setStructUploadName}
+            extractError={structExtractError}
+            onDismissError={() => setStructExtractError(null)}
             isExtracting={structExtracting}
-            onExtract={handleStructExtract}
+            onExtract={() => {}}
+            extractSlot={
+              <button
+                type="button"
+                onClick={() => setStructExtractDialogOpen(true)}
+                disabled={structExtracting}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-[620] cursor-pointer",
+                  "border-line bg-white/60 text-foreground hover:bg-white/80",
+                  "transition-[background] duration-150",
+                  structExtracting && "opacity-60 cursor-not-allowed"
+                )}
+              >
+                {structExtracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {structExtracting ? "提取中..." : "AI 从文件提取"}
+              </button>
+            }
             onCreateCustom={() => { setStructEditing(createBlankTemplate()); setStructSnapshot(null); setStructReadOnly(false) }}
             onView={(t) => { setStructEditing(t); setStructSnapshot(t); setStructReadOnly(true) }}
             onCopy={handleStructCopy}
@@ -607,6 +660,17 @@ export function TemplateLibraryView() {
             onUnpin={handleStructUnpin}
             onDelete={setStructDeleteTarget}
           />
+          <ExtractTemplateDialog
+            open={structExtractDialogOpen}
+            isExtracting={structExtracting}
+            knowledgeFiles={knowledgeFiles}
+            onOpenChange={setStructExtractDialogOpen}
+            onConfirm={(file, mode) => {
+              setStructExtractDialogOpen(false)
+              handleStructExtract(file, mode)
+            }}
+          />
+          </>
         )
       ) : (
         styleEditing ? (
@@ -629,6 +693,7 @@ export function TemplateLibraryView() {
             canSaveAsNew={styleTemplates.length < MAX_TEMPLATES}
           />
         ) : (
+          <>
           <StyleBrowsePanel
             templates={filteredStyle}
             totalCount={styleTemplates.length}
@@ -638,7 +703,25 @@ export function TemplateLibraryView() {
             uploadName={styleUploadName}
             onUploadName={setStyleUploadName}
             isExtracting={styleExtracting}
-            onExtract={handleStyleExtract}
+            onExtract={() => {}}
+            extractError={styleExtractError}
+            onDismissError={() => setStyleExtractError(null)}
+            extractSlot={
+              <button
+                type="button"
+                onClick={() => setStyleExtractDialogOpen(true)}
+                disabled={styleExtracting}
+                className={cn(
+                  "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-[620] cursor-pointer",
+                  "border-line bg-white/60 text-foreground hover:bg-white/80",
+                  "transition-[background] duration-150",
+                  styleExtracting && "opacity-60 cursor-not-allowed"
+                )}
+              >
+                {styleExtracting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {styleExtracting ? "提取中..." : "AI 从文件提取"}
+              </button>
+            }
             onCreateCustom={() => { setStyleEditing(createBlankStyleTemplate()); setStyleSnapshot(null); setStyleReadOnly(false) }}
             onView={(t) => { setStyleEditing(t); setStyleSnapshot(t); setStyleReadOnly(true) }}
             onCopy={handleStyleCopy}
@@ -646,6 +729,18 @@ export function TemplateLibraryView() {
             onUnpin={handleStyleUnpin}
             onDelete={setStyleDeleteTarget}
           />
+          <ExtractTemplateDialog
+            open={styleExtractDialogOpen}
+            isExtracting={styleExtracting}
+            knowledgeFiles={knowledgeFiles}
+            onOpenChange={setStyleExtractDialogOpen}
+            showMode={false}
+            onConfirm={(file) => {
+              setStyleExtractDialogOpen(false)
+              handleStyleExtract(file)
+            }}
+          />
+          </>
         )
       )}
 
@@ -724,8 +819,10 @@ function ActionBar({
   onCreateCustom,
   uploadName,
   onUploadName,
+  onUploadFile,
   isExtracting,
   onExtract,
+  extractSlot,
   totalCount,
   search,
   onSearch,
@@ -733,8 +830,11 @@ function ActionBar({
   onCreateCustom: () => void
   uploadName: string | null
   onUploadName: (v: string | null) => void
+  onUploadFile?: (file: File | null) => void
   isExtracting: boolean
   onExtract: () => void
+  /** 若提供,用此节点替代默认的「AI从文件提取」label+input+开始提取+移除区块(结构模板用)。 */
+  extractSlot?: React.ReactNode
   totalCount: number
   search: string
   onSearch: (v: string) => void
@@ -754,49 +854,58 @@ function ActionBar({
         自定义创建
       </button>
 
-      <div className="flex items-center gap-2">
-        <label
-          className={cn(
-            "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-[620] cursor-pointer",
-            "border-line bg-white/60 text-foreground hover:bg-white/80",
-            "transition-[background] duration-150",
-            uploadName && "border-success bg-[rgba(23,132,94,0.04)]"
-          )}
-        >
-          <Upload className="w-4 h-4" />
-          {uploadName ? uploadName : "AI 从文件提取"}
-          <input
-            type="file"
-            accept=".docx,.pdf,.txt"
-            className="sr-only"
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) onUploadName(file.name)
-            }}
-          />
-        </label>
-        {uploadName && (
-          <button
-            type="button"
-            onClick={onExtract}
-            disabled={isExtracting}
+      {extractSlot ? (
+        extractSlot
+      ) : (
+        <div className="flex items-center gap-2">
+          <label
             className={cn(
-              "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-[620] cursor-pointer border",
-              "text-white transition-[background,opacity] duration-150",
-              isExtracting
-                ? "border-line bg-[#c9c3c7] opacity-60 cursor-not-allowed"
-                : "border-accent-deep bg-gradient-to-br from-[#cf4657] to-[#aa2639] hover:from-[#c23b4d] hover:to-[#981f32]"
+              "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border text-sm font-[620] cursor-pointer",
+              "border-line bg-white/60 text-foreground hover:bg-white/80",
+              "transition-[background] duration-150",
+              uploadName && "border-success bg-[rgba(23,132,94,0.04)]"
             )}
           >
-            {isExtracting ? <><Loader2 className="w-4 h-4 animate-spin" /> 提取中...</> : <><FileText className="w-4 h-4" /> 开始提取</>}
-          </button>
-        )}
-        {uploadName && (
-          <button type="button" onClick={() => onUploadName(null)} className="p-1 rounded hover:bg-muted transition-colors cursor-pointer border-0 bg-transparent">
-            <X className="w-3.5 h-3.5 text-muted-text" />
-          </button>
-        )}
-      </div>
+            <Upload className="w-4 h-4" />
+            {uploadName ? uploadName : "AI 从文件提取"}
+            <input
+              type="file"
+              accept=".docx,.pdf,.txt"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) {
+                  onUploadName(file.name)
+                  onUploadFile?.(file)
+                }
+                // 重置 input value 以便重复选同一文件
+                e.target.value = ""
+              }}
+            />
+          </label>
+          {uploadName && (
+            <button
+              type="button"
+              onClick={onExtract}
+              disabled={isExtracting}
+              className={cn(
+                "inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-[620] cursor-pointer border",
+                "text-white transition-[background,opacity] duration-150",
+                isExtracting
+                  ? "border-line bg-[#c9c3c7] opacity-60 cursor-not-allowed"
+                  : "border-accent-deep bg-gradient-to-br from-[#cf4657] to-[#aa2639] hover:from-[#c23b4d] hover:to-[#981f32]"
+              )}
+            >
+              {isExtracting ? <><Loader2 className="w-4 h-4 animate-spin" /> 提取中...</> : <><FileText className="w-4 h-4" /> 开始提取</>}
+            </button>
+          )}
+          {uploadName && (
+            <button type="button" onClick={() => { onUploadName(null); onUploadFile?.(null) }} className="p-1 rounded hover:bg-muted transition-colors cursor-pointer border-0 bg-transparent">
+              <X className="w-3.5 h-3.5 text-muted-text" />
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex-1" />
       <span className="text-xs text-subtle">共 {totalCount} 个模板</span>
@@ -823,8 +932,12 @@ function StructureBrowsePanel({
   onSearch,
   uploadName,
   onUploadName,
+  onUploadFile,
   isExtracting,
+  extractError,
+  onDismissError,
   onExtract,
+  extractSlot,
   onCreateCustom,
   onView,
   onCopy,
@@ -839,8 +952,12 @@ function StructureBrowsePanel({
   onSearch: (v: string) => void
   uploadName: string | null
   onUploadName: (v: string | null) => void
+  onUploadFile?: (file: File | null) => void
   isExtracting: boolean
+  extractError?: string | null
+  onDismissError?: () => void
   onExtract: () => void
+  extractSlot?: React.ReactNode
   onCreateCustom: () => void
   onView: (t: WritingTemplate) => void
   onCopy: (t: WritingTemplate) => void
@@ -854,12 +971,26 @@ function StructureBrowsePanel({
         onCreateCustom={onCreateCustom}
         uploadName={uploadName}
         onUploadName={onUploadName}
+        onUploadFile={onUploadFile}
         isExtracting={isExtracting}
         onExtract={onExtract}
+        extractSlot={extractSlot}
         totalCount={totalCount}
         search={search}
         onSearch={onSearch}
       />
+
+      {extractError && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-[rgba(200,60,78,0.24)] bg-accent-faint px-3 py-2.5">
+          <AlertCircle className="w-4 h-4 text-accent-deep flex-none mt-0.5" />
+          <span className="flex-1 text-xs text-accent-deep leading-relaxed">{extractError}</span>
+          {onDismissError && (
+            <button type="button" onClick={onDismissError} className="text-accent-deep/60 hover:text-accent-deep cursor-pointer border-0 bg-transparent p-0" title="关闭">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {templates.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -894,7 +1025,7 @@ function StructureBrowsePanel({
 /*  Structure edit panel                                              */
 /* ================================================================== */
 
-function StructureEditPanel({
+export function StructureEditPanel({
   template,
   readOnly = false,
   isPreset = false,
@@ -906,7 +1037,6 @@ function StructureEditPanel({
   onDemoteSection,
   onRemoveSection,
   onMoveSection,
-  knowledgeFiles = [],
   onSave,
   onSaveAsNew,
   onBack,
@@ -925,7 +1055,6 @@ function StructureEditPanel({
   onDemoteSection?: (id: string) => void
   onRemoveSection: (id: string) => void
   onMoveSection: (id: string, direction: "up" | "down") => void
-  knowledgeFiles?: KnowledgeFile[]
   onSave: () => void
   onSaveAsNew: () => void
   onBack: () => void
@@ -1029,7 +1158,6 @@ function StructureEditPanel({
                     onMove={onMoveSection}
                     onAddSubsection={onAddSubsection}
                     onDemoteSection={onDemoteSection}
-                    knowledgeFiles={knowledgeFiles}
                   />
                   {children.map((child, ci) => (
                     <SectionCard
@@ -1043,7 +1171,6 @@ function StructureEditPanel({
                       onRemove={onRemoveSection}
                       onMove={onMoveSection}
                       onPromoteSection={onPromoteSection}
-                      knowledgeFiles={knowledgeFiles}
                     />
                   ))}
                 </div>
@@ -1113,6 +1240,9 @@ function StyleBrowsePanel({
   onUploadName,
   isExtracting,
   onExtract,
+  extractSlot,
+  extractError,
+  onDismissError,
   onCreateCustom,
   onView,
   onCopy,
@@ -1129,6 +1259,9 @@ function StyleBrowsePanel({
   onUploadName: (v: string | null) => void
   isExtracting: boolean
   onExtract: () => void
+  extractSlot?: React.ReactNode
+  extractError?: string | null
+  onDismissError?: () => void
   onCreateCustom: () => void
   onView: (t: StyleTemplate) => void
   onCopy: (t: StyleTemplate) => void
@@ -1144,10 +1277,23 @@ function StyleBrowsePanel({
         onUploadName={onUploadName}
         isExtracting={isExtracting}
         onExtract={onExtract}
+        extractSlot={extractSlot}
         totalCount={totalCount}
         search={search}
         onSearch={onSearch}
       />
+
+      {extractError && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-[rgba(200,60,78,0.24)] bg-accent-faint px-3 py-2.5">
+          <AlertCircle className="w-4 h-4 text-accent-deep flex-none mt-0.5" />
+          <span className="flex-1 text-xs text-accent-deep leading-relaxed">{extractError}</span>
+          {onDismissError && (
+            <button type="button" onClick={onDismissError} className="text-accent-deep/60 hover:text-accent-deep cursor-pointer border-0 bg-transparent p-0" title="关闭">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
 
       {templates.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -1237,61 +1383,68 @@ function RequirementItem({
   onMove: (dir: "up" | "down") => void
 }) {
   return (
-    <div className="flex items-center gap-2 bg-white/60 border border-line rounded-xl p-2">
-      <div className="flex flex-col gap-0.5">
-        <button
-          type="button"
-          disabled={readOnly || index === 0}
-          onClick={() => onMove("up")}
-          className={cn(
-            "w-6 h-6 rounded-md border border-line bg-white/60 hover:bg-white/80 grid place-items-center transition-[background,opacity] duration-150",
-            readOnly || index === 0 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
+    <div className="bg-white/60 border border-line rounded-xl p-2.5">
+      {/* 操作行:序号 + 排序 + 删除 */}
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs font-[680] text-muted-text w-5 text-center flex-none">{index + 1}</span>
+        <div className="flex-1" />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={readOnly || index === 0}
+            onClick={() => onMove("up")}
+            className={cn(
+              "w-6 h-6 rounded-md border border-line bg-white/60 hover:bg-white/80 grid place-items-center transition-[background,opacity] duration-150",
+              readOnly || index === 0 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
+            )}
+            title="上移"
+          >
+            <ChevronUp className="w-3 h-3" />
+          </button>
+          <button
+            type="button"
+            disabled={readOnly || index === total - 1}
+            onClick={() => onMove("down")}
+            className={cn(
+              "w-6 h-6 rounded-md border border-line bg-white/60 hover:bg-white/80 grid place-items-center transition-[background,opacity] duration-150",
+              readOnly || index === total - 1 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
+            )}
+            title="下移"
+          >
+            <ChevronDown className="w-3 h-3" />
+          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="w-7 h-7 rounded-lg grid place-items-center text-muted-text hover:text-accent-deep hover:bg-white/60 cursor-pointer transition-[color,background] duration-150 flex-none"
+              title="删除此参考"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           )}
-        >
-          <ChevronUp className="w-3 h-3" />
-        </button>
-        <button
-          type="button"
-          disabled={readOnly || index === total - 1}
-          onClick={() => onMove("down")}
-          className={cn(
-            "w-6 h-6 rounded-md border border-line bg-white/60 hover:bg-white/80 grid place-items-center transition-[background,opacity] duration-150",
-            readOnly || index === total - 1 ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
-          )}
-        >
-          <ChevronDown className="w-3 h-3" />
-        </button>
+        </div>
       </div>
-      <span className="text-xs font-[680] text-muted-text w-5 text-center flex-none">{index + 1}</span>
-      <input
-        type="text"
+      {/* 范文片段(正样本,支持句子/段落) */}
+      <textarea
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="如：善用排比句式增强气势"
+        placeholder="粘贴一段可模仿的范文片段(正样本),模型将据此学习风格"
         disabled={readOnly}
+        rows={2}
         className={cn(
-          "flex-1 min-w-0 h-8 px-3 border border-line rounded-lg text-sm",
-          "bg-white/60 text-foreground placeholder:text-subtle",
+          "w-full min-h-[64px] px-3 py-2 border border-line rounded-lg text-sm resize-y",
+          "bg-white/60 text-foreground placeholder:text-subtle leading-relaxed",
           "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
           "transition-[border-color,box-shadow] duration-150",
-          readOnly && "bg-muted/30 cursor-not-allowed"
+          readOnly && "bg-muted/30 cursor-not-allowed resize-none"
         )}
       />
-      {!readOnly && (
-        <button
-          type="button"
-          onClick={onRemove}
-          className="w-7 h-7 rounded-lg grid place-items-center text-muted-text hover:text-accent-deep hover:bg-white/60 cursor-pointer transition-[color,background] duration-150 flex-none"
-          title="删除此要求"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
-      )}
     </div>
   )
 }
 
-function StyleEditPanel({
+export function StyleEditPanel({
   template,
   readOnly = false,
   isPreset = false,
@@ -1449,11 +1602,11 @@ function StyleEditPanel({
         </div>
       </div>
 
-      {/* ---- 写作要求条目 ---- */}
+      {/* ---- 写作风格参考条目 ---- */}
       <div className="mb-5">
-        <label className="block text-xs font-[620] text-muted-text mb-2">写作要求</label>
+        <label className="block text-xs font-[620] text-muted-text mb-2">写作风格参考</label>
         {template.writingRequirements.length === 0 ? (
-          readOnly ? <p className="text-sm text-muted-text">暂无写作要求</p> : null
+          readOnly ? <p className="text-sm text-muted-text">暂无写作风格参考</p> : null
         ) : (
           <div className="space-y-2 mb-2">
             {template.writingRequirements.map((req, idx) => (
@@ -1476,7 +1629,7 @@ function StyleEditPanel({
             onClick={onAddRequirement}
             className="flex items-center gap-1.5 text-sm font-[620] text-accent-deep cursor-pointer hover:underline"
           >
-            <Plus className="w-4 h-4" /> 添加写作要求
+            <Plus className="w-4 h-4" /> 添加写作风格参考
           </button>
         )}
       </div>

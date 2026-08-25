@@ -1,13 +1,31 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { LayoutGrid, ArrowRight, X, FileText } from "lucide-react"
+import { useState, useCallback, useMemo, Fragment, type ComponentProps } from "react"
+import { LayoutGrid, ArrowRight, X, Pencil, Save } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppDispatch } from "@/hooks/use-app-state"
 import { modeCopy } from "@/data/modes"
-import { type WritingTemplate, loadSavedTemplates } from "@/data/template"
+import {
+  type WritingTemplate,
+  loadSavedTemplates,
+  saveTemplates,
+  MAX_TEMPLATES,
+} from "@/data/template"
 import { setTemplateWritingInput } from "@/lib/template-data"
+import { collectPlaceholders } from "@/lib/template-writing-engine"
 import { TemplatePickerDialog } from "@/components/template-picker-dialog"
+import { PlaceholderFieldsForm } from "@/components/placeholder-fields-form"
+import { SectionAdjuster } from "@/components/section-adjuster"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
 
 /** Group flat sections into [parent, ...children] arrays (read-only display). */
 function toGroups(sections: WritingTemplate["sections"]) {
@@ -38,6 +56,26 @@ export function TemplateWriteView() {
   const [selectedTemplate, setSelectedTemplate] = useState<WritingTemplate | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
 
+  // P1-⑤: sections adjusted locally for this writing session (not saved back).
+  // When null, the template's original sections are used.
+  const [adjustedSections, setAdjustedSections] = useState<WritingTemplate["sections"] | null>(null)
+  const [adjusterOpen, setAdjusterOpen] = useState(false)
+
+  // P1-④: placeholder values for fill-mode sections.
+  const [placeholderValues, setPlaceholderValues] = useState<Record<string, string>>({})
+
+  // Effective sections: adjusted copy if present, otherwise the template's originals.
+  const effectiveSections = useMemo(
+    () => adjustedSections ?? selectedTemplate?.sections ?? [],
+    [adjustedSections, selectedTemplate],
+  )
+
+  // Collect placeholders from fill-mode sections of the effective template.
+  const placeholderFields = useMemo(
+    () => collectPlaceholders(effectiveSections),
+    [effectiveSections],
+  )
+
   const canStart =
     documentTitle.trim().length > 0 &&
     selectedTemplate !== null &&
@@ -47,18 +85,56 @@ export function TemplateWriteView() {
     if (!selectedTemplate || !canStart) return
     setTemplateWritingInput({
       templateName: selectedTemplate.name,
-      sections: selectedTemplate.sections,
+      sections: effectiveSections,
+      // 参考文档展示已移除,模板写作不再携带章节级参考文件。
       referenceFiles: [],
       totalWordCountMin: null,
       totalWordCountMax: null,
       additionalNotes,
       documentTitle,
       draftingUnit,
+      placeholderValues,
     })
     dispatch({ type: "SET_CHAT_MODE", mode: "模板写作" })
     dispatch({ type: "CLEAR_CHAT" })
     dispatch({ type: "SET_VIEW", view: "chat" })
-  }, [selectedTemplate, canStart, additionalNotes, documentTitle, draftingUnit, dispatch])
+  }, [selectedTemplate, canStart, effectiveSections, additionalNotes, documentTitle, draftingUnit, placeholderValues, dispatch])
+
+  // ── Save adjusted sections as a new custom template (preset stays read-only) ──
+  const [saveAsNewOpen, setSaveAsNewOpen] = useState(false)
+  const [saveAsNewName, setSaveAsNewName] = useState("")
+  const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null)
+
+  const openSaveAsNew = useCallback(() => {
+    if (!selectedTemplate) return
+    setSaveAsNewName(selectedTemplate.name ? `${selectedTemplate.name}(微调版)` : "")
+    setSaveAsNewOpen(true)
+  }, [selectedTemplate])
+
+  const handleSaveAsNew = useCallback(() => {
+    if (!selectedTemplate) return
+    const all = loadSavedTemplates()
+    if (all.length >= MAX_TEMPLATES) {
+      setNotice({ text: `模板库已满(上限 ${MAX_TEMPLATES} 个),请先在模板库删除不需要的模板`, ok: false })
+      setSaveAsNewOpen(false)
+      return
+    }
+    const name = saveAsNewName.trim() || "未命名模板"
+    const now = new Date().toISOString()
+    const newT: WritingTemplate = {
+      ...selectedTemplate,
+      id: crypto.randomUUID(),
+      name,
+      source: "custom",
+      sections: effectiveSections.map((s) => ({ ...s, referenceFiles: [...s.referenceFiles] })),
+      createdAt: now,
+      updatedAt: now,
+    }
+    saveTemplates([...all, newT])
+    setSaveAsNewOpen(false)
+    setSaveAsNewName("")
+    setNotice({ text: `已保存为自定义模板:${name}(可在模板库查看)`, ok: true })
+  }, [selectedTemplate, saveAsNewName, effectiveSections])
 
   // force re-render of picker list each open by keying on open state
   const hasTemplates = loadSavedTemplates().length > 0
@@ -146,11 +222,35 @@ export function TemplateWriteView() {
           )}
         </h3>
 
+        {notice && (
+          <div
+            className={cn(
+              "mb-3 rounded-xl px-4 py-2.5 text-xs font-[580] border",
+              notice.ok
+                ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                : "bg-accent-soft/60 border-[rgba(200,60,78,0.24)] text-accent-deep",
+            )}
+          >
+            {notice.text}
+          </div>
+        )}
+
         {selectedTemplate ? (
           <SelectedTemplateSummary
             template={selectedTemplate}
+            sections={effectiveSections}
+            adjusted={adjustedSections !== null}
             onReplace={() => setPickerOpen(true)}
-            onRemove={() => setSelectedTemplate(null)}
+            onRemove={() => {
+              setSelectedTemplate(null)
+              setAdjustedSections(null)
+              setPlaceholderValues({})
+            }}
+            onAdjust={() => {
+              setAdjustedSections(effectiveSections.map((s) => ({ ...s })))
+              setAdjusterOpen(true)
+            }}
+            onSaveAsNew={openSaveAsNew}
           />
         ) : (
           <button
@@ -173,6 +273,17 @@ export function TemplateWriteView() {
           </button>
         )}
       </div>
+
+      {/* ============================================================ */}
+      {/*  Card 3 — 待填字段 (仅当模板含 fill 占位符时显示)              */}
+      {/* ============================================================ */}
+      {selectedTemplate && placeholderFields.length > 0 && (
+        <PlaceholderFieldsForm
+          fields={placeholderFields}
+          values={placeholderValues}
+          onChange={setPlaceholderValues}
+        />
+      )}
 
       {/* ============================================================ */}
       {/*  Start writing                                               */}
@@ -198,8 +309,52 @@ export function TemplateWriteView() {
       <TemplatePickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}
-        onPick={(t) => setSelectedTemplate(t)}
+        onPick={(t) => {
+          setSelectedTemplate(t)
+          setAdjustedSections(null)
+          setPlaceholderValues({})
+        }}
       />
+
+      {adjusterOpen && selectedTemplate && (
+        <SectionAdjuster
+          templateName={selectedTemplate.name}
+          sections={adjustedSections ?? selectedTemplate.sections}
+          onChange={setAdjustedSections}
+          onClose={() => setAdjusterOpen(false)}
+        />
+      )}
+
+      {/* 另存为自定义模板 — 命名对话框 */}
+      <Dialog open={saveAsNewOpen} onOpenChange={setSaveAsNewOpen}>
+        <DialogContent className="sm:max-w-[420px] rounded-xl p-0 overflow-hidden">
+          <div className="px-6 pt-6 pb-2 space-y-3">
+            <DialogHeader>
+              <DialogTitle className="text-left text-base font-semibold tracking-tight">
+                另存为自定义模板
+              </DialogTitle>
+              <DialogDescription className="text-left text-sm leading-relaxed text-muted-foreground">
+                将本次微调后的结构保存为新模板,原预设模板保持不变。请输入新模板名称:
+              </DialogDescription>
+            </DialogHeader>
+            <input
+              type="text"
+              value={saveAsNewName}
+              onChange={(e) => setSaveAsNewName(e.target.value)}
+              className="w-full h-9 px-3 border border-line rounded-lg text-sm bg-white/60 focus:outline-none focus:border-[rgba(200,60,78,0.36)] transition-[border-color] duration-150"
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="flex-row justify-end gap-2 px-6 pb-6 pt-4">
+            <DialogClose render={(props: ComponentProps<"button">) => <Button variant="outline" size="default" {...props} />}>
+              取消
+            </DialogClose>
+            <Button size="default" onClick={handleSaveAsNew} disabled={!saveAsNewName.trim()}>
+              确认保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -210,15 +365,23 @@ export function TemplateWriteView() {
 
 function SelectedTemplateSummary({
   template,
+  sections,
+  adjusted,
   onReplace,
   onRemove,
+  onAdjust,
+  onSaveAsNew,
 }: {
   template: WritingTemplate
+  sections: WritingTemplate["sections"]
+  adjusted: boolean
   onReplace: () => void
   onRemove: () => void
+  onAdjust: () => void
+  onSaveAsNew: () => void
 }) {
   const isPreset = template.id.startsWith("preset-")
-  const groups = toGroups(template.sections)
+  const groups = toGroups(sections)
 
   return (
     <div className="relative border border-line rounded-xl p-4 bg-white/60">
@@ -238,9 +401,14 @@ function SelectedTemplateSummary({
             >
               {isPreset ? "预设" : template.source === "file" ? "文件提取" : "自定义"}
             </span>
+            {adjusted && (
+              <span className="text-[9px] font-[660] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 flex-none">
+                已微调
+              </span>
+            )}
           </div>
           <p className="text-xs text-muted-text mt-0.5">
-            {groups.length} 个一级标题 · 共 {template.sections.length} 个章节
+            {groups.length} 个一级标题 · 共 {sections.length} 个章节
           </p>
         </div>
       </div>
@@ -261,37 +429,37 @@ function SelectedTemplateSummary({
                       ? `≤${s.wordCountMax}字`
                       : ""
               return (
-                <div
-                  key={s.id}
-                  className={cn(
-                    "flex items-center gap-2 py-1",
-                    isSub && "ml-6"
-                  )}
-                >
-                  <span
+                <Fragment key={s.id}>
+                  <div
                     className={cn(
-                      "text-[11px] font-[680] text-muted-text w-6 text-center flex-none",
-                      isSub && "text-[10px]"
+                      "flex items-center gap-2 py-1",
+                      isSub && "ml-6"
                     )}
                   >
-                    {label}
-                  </span>
-                  <FileText className="w-3.5 h-3.5 text-muted-text flex-none" />
-                  <span
-                    className={cn(
-                      "text-xs flex-1 min-w-0 truncate",
-                      isSub ? "text-muted-text font-[560]" : "text-foreground font-[600]"
+                    <span
+                      className={cn(
+                        "text-[11px] font-[680] text-muted-text w-6 text-center flex-none",
+                        isSub && "text-[10px]"
+                      )}
+                    >
+                      {label}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-xs flex-1 min-w-0 truncate",
+                        isSub ? "text-muted-text font-[560]" : "text-foreground font-[600]"
+                      )}
+                    >
+                      {s.title || "（无标题）"}
+                    </span>
+                    {wordRange && (
+                      <span className="text-[10px] text-subtle flex-none">{wordRange}</span>
                     )}
-                  >
-                    {s.title || "（无标题）"}
-                  </span>
-                  {wordRange && (
-                    <span className="text-[10px] text-subtle flex-none">{wordRange}</span>
-                  )}
-                  {s.writingMode === "fill" && (
-                    <span className="text-[10px] text-accent-deep/70 flex-none">占位符</span>
-                  )}
-                </div>
+                    {s.writingMode === "fill" && (
+                      <span className="text-[10px] text-accent-deep/70 flex-none">占位符</span>
+                    )}
+                  </div>
+                </Fragment>
               )
             })}
           </div>
@@ -307,6 +475,23 @@ function SelectedTemplateSummary({
         >
           <LayoutGrid className="w-3.5 h-3.5" /> 更换模板
         </button>
+        <button
+          type="button"
+          onClick={onAdjust}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-line bg-white/60 text-xs font-[620] text-foreground cursor-pointer hover:bg-white/80 transition-[background] duration-150"
+        >
+          <Pencil className="w-3.5 h-3.5" /> {adjusted ? "继续微调" : "本次微调"}
+        </button>
+        {adjusted && (
+          <button
+            type="button"
+            onClick={onSaveAsNew}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-accent-deep/30 bg-accent-soft/50 text-xs font-[620] text-accent-deep cursor-pointer hover:bg-accent-soft transition-[background] duration-150"
+            title="将本次微调后的结构保存为新的自定义模板,原预设不变"
+          >
+            <Save className="w-3.5 h-3.5" /> 另存为自定义模板
+          </button>
+        )}
         <button
           type="button"
           onClick={onRemove}

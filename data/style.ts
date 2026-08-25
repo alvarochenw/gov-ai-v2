@@ -103,9 +103,8 @@ export const presetStyleTemplates: StyleTemplate[] = [
     source: "custom",
     styleSpec: { ...RECOMMENDED_SPEC["通知"] },
     writingRequirements: [
-      "行文简洁规范，事项条目化呈现",
-      "用词严谨统一，不使用修辞手法",
-      "通知事项逐条列述，要求明确具体",
+      "现将有关事项通知如下：一、请各单位于X月X日前完成本辖区风险隐患排查整治工作，建立问题台账并实行销号管理；二、严格落实安全生产主体责任，明确到岗到人，确保各项措施落地见效；三、加强督导检查，定期通报进展，对落实不力的严肃追责问责。",
+      "经研究，决定于X月X日召开XX工作会议。现将有关事项通知如下：一、会议时间：X月X日上（下）午X时；二、会议地点：XX会议室；三、参会人员：各单位主要负责同志；四、有关要求：请参会人员提前10分钟入场，会议期间请将手机调至静音。",
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -116,9 +115,8 @@ export const presetStyleTemplates: StyleTemplate[] = [
     source: "custom",
     styleSpec: { ...RECOMMENDED_SPEC["请示"] },
     writingRequirements: [
-      "缘由充分，事项明确，请求具体",
-      "用语敬重恳切，语气谦谨",
-      "结尾以请求批示收束，如'妥否，请批示'",
+      "为切实做好XX工作，进一步提升XX能力水平，根据《XX办法》有关规定，结合我单位实际，拟于近期开展XX工作。经测算，共需经费XX万元，主要用于XX、XX等方面。鉴于该项工作已列入年度重点任务且时间紧迫，恳请上级予以支持并批准上述经费。",
+      "近期，我单位在XX工作中遇到XX问题，涉及XX事项。经初步研究，拟按XX方案处理，具体为：一、……；二、……。鉴于该事项政策性较强且影响面较大，特此请示，妥否，请批示。",
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -129,9 +127,8 @@ export const presetStyleTemplates: StyleTemplate[] = [
     source: "custom",
     styleSpec: { ...RECOMMENDED_SPEC["工作总结"] },
     writingRequirements: [
-      "客观陈述，成绩与问题并重",
-      "以事实和数据为支撑，避免空话套话",
-      "结构按 情况—做法—成效—问题—下步安排 推进",
+      "今年以来，我单位围绕XX中心任务，扎实推进各项工作，取得阶段性成效。1至X月，累计完成XX任务XX项，同比增长XX%；办理XX事项XX件，办结率达XX%。主要做法：一是健全机制，制定出台《XX方案》，明确责任分工与时序进度；二是强化落实，建立周调度、月通报制度，确保任务到人到岗。",
+      "在取得成绩的同时，工作中仍存在一些不容忽视的问题：一是XX推进不够平衡，部分领域进展滞后于预期；二是XX基础相对薄弱，XX能力有待进一步提升。下一步，将聚焦问题短板，重点抓好XX、XX等工作，力争年度目标任务高质量完成。",
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -142,10 +139,8 @@ export const presetStyleTemplates: StyleTemplate[] = [
     source: "custom",
     styleSpec: { ...RECOMMENDED_SPEC["讲话"] },
     writingRequirements: [
-      "善用排比句式增强气势",
-      "段落开头以短句点题",
-      "结尾以号召性语言收束全文",
-      "庄重但不刻板，适当穿插口语化表达",
+      "同志们，这次会议是一次十分重要的会议。刚才，XX同志对下步工作作了具体部署，我都赞同。下面，我再强调三点意见：一要提高站位抓落实，以更高的政治站位认识XX工作的重大意义；二要聚焦重点抓落实，以更实的举措推进XX任务落地见效；三要压实责任抓落实，以更严的标准确保各项工作高质量完成。",
+      "做好XX工作，使命光荣、责任重大。让我们以时不我待的紧迫感、舍我其谁的责任感，凝心聚力、真抓实干，奋力开创XX工作新局面，为XX作出新的更大贡献！",
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -156,9 +151,8 @@ export const presetStyleTemplates: StyleTemplate[] = [
     source: "custom",
     styleSpec: { ...RECOMMENDED_SPEC["调研报告"] },
     writingRequirements: [
-      "以事实和数据为支撑，逻辑层层递进",
-      "观点需有据可查，避免主观臆断",
-      "结论部分提出可操作性建议",
+      "近期，围绕XX课题，调研组赴XX、XX等地开展专题调研，走访单位XX家，座谈XX人次，查阅资料XX份。调研发现：一是XX工作总体推进有序，XX率达XX%，但存在XX不平衡问题；二是XX机制不够健全，XX环节衔接不畅；三是XX保障相对不足，制约工作质效提升。",
+      "针对上述问题，建议：一要完善XX机制，出台《XX细则》，明确流程标准；二要强化XX保障，加大XX投入，充实XX力量；三要健全XX考核，将XX纳入绩效评价，形成闭环管理。以上建议供领导决策参考。",
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -169,9 +163,7 @@ export const presetStyleTemplates: StyleTemplate[] = [
     source: "custom",
     styleSpec: { ...RECOMMENDED_SPEC["简报"] },
     writingRequirements: [
-      "精炼概括，一事一报",
-      "短句条目化呈现，不铺陈",
-      "标题导语点明主旨，主体条目化展开",
+      "【XX工作简报 第X期】XX单位纵深推进XX工作取得阶段性成效。今年以来，该单位坚持问题导向，创新工作举措，推动XX工作提质增效。一是抓机制，建立XX制度，规范XX流程；二是抓重点，聚焦XX环节，集中力量攻坚突破；三是抓督导，实行XX通报，倒逼责任落实。",
     ],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -194,7 +186,7 @@ export async function mockExtractStyleFromFile(fileName: string): Promise<StyleT
     source: "file",
     sourceFileName: fileName,
     styleSpec: { ...RECOMMENDED_SPEC[docType] },
-    writingRequirements: [`从参考文件提取的${docType}风格要求`],
+    writingRequirements: [`从参考文件提取的${docType}范文片段`],
     createdAt: now,
     updatedAt: now,
   })
@@ -213,7 +205,7 @@ export async function mockExtractStyleFromFile(fileName: string): Promise<StyleT
     source: "file",
     sourceFileName: fileName,
     styleSpec: { ...emptyStyleSpec(), documentType: "其他", tone: "正式规范", person: "第三人称", sentenceStyle: "逻辑清晰，长短句结合", diction: "公文规范用语" },
-    writingRequirements: ["从参考文件提取：整体风格正式规范，行文逻辑清晰，用词准确得体"],
+    writingRequirements: ["从参考文件提取：该文种整体风格正式规范，行文逻辑清晰，用词准确得体，可作为范文片段参考"],
     createdAt: now,
     updatedAt: now,
   }
@@ -281,9 +273,13 @@ export function loadSavedStyleTemplates(): StyleTemplate[] {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return [...presetStyleTemplates]
     const userSaved = JSON.parse(raw) as (StyleTemplate & { dimensions?: StyleDimension[]; styleNote?: string })[]
+    // 先放代码版预设为基底,再用 localStorage 的项覆盖(含 preset- —— 后台修改的预设
+    // 会覆盖代码版)。这样系统后台对预设的修改能生效。
     const map = new Map<string, StyleTemplate>()
     for (const t of presetStyleTemplates) map.set(t.id, t)
-    for (const t of userSaved) map.set(t.id, normalizeStyleTemplate(t))
+    for (const t of userSaved) {
+      map.set(t.id, normalizeStyleTemplate(t))
+    }
     return Array.from(map.values())
   } catch {
     return [...presetStyleTemplates]

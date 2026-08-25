@@ -89,7 +89,7 @@ export function StyleLibraryCard({
             </span>
             {template.writingRequirements.length > 0 && (
               <span className="text-[10px] text-subtle flex-none">
-                {template.writingRequirements.length} 条要求
+                {template.writingRequirements.length} 段范文
               </span>
             )}
             <span className={cn(

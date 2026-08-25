@@ -19,6 +19,7 @@ export interface TemplateWritingInput {
   additionalNotes: string        // 写作要求(全局提示词)
   documentTitle: string          // 公文标题
   draftingUnit: string           // 拟稿单位(选填)
+  placeholderValues?: Record<string, string>  // fill 模式占位符取值(用户在配置页填写)
 }
 
 let pendingInput: TemplateWritingInput | null = null

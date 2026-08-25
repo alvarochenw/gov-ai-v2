@@ -16,6 +16,7 @@ import { SessionListView } from "@/components/session-list-view"
 import { KnowledgeView } from "@/components/knowledge-view"
 import { ExpertCard } from "@/components/expert-card"
 import { TemplateLibraryView } from "@/components/template-library-view"
+import { AdminShell } from "@/components/admin-view"
 import { ChatView } from "@/components/chat-view"
 import { QuickWriteView } from "@/components/quick-write-view"
 import { TemplateWriteView } from "@/components/template-write-view"
@@ -36,7 +37,7 @@ import type { ModeName } from "@/types"
 
 const writingSubItems = [
   { view: "write-quick", label: "快速写作" },
-  { view: "write-template", label: "模板写作" },
+  // [HIDDEN] { view: "write-template", label: "模板写作" },
   // [HIDDEN] { view: "write-style", label: "风格写作" },
   { view: "write-ref", label: "以文写文" },
 ]
@@ -435,6 +436,11 @@ export function AppShell() {
 
   // Chat view needs full height without padding
   const isChat = view === "chat"
+
+  // 系统后台是独立页面体系,不共用前台 shell
+  if (view === "admin") {
+    return <AdminShell />
+  }
 
   return (
     <div className="min-h-dvh">

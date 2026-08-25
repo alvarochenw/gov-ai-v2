@@ -55,26 +55,27 @@ export function ReferenceFilesEditor({
   const removeRef = (name: string) => onChange(list.filter((f) => f.name !== name))
 
   if (readOnly) {
-    if (list.length === 0) return null
     return (
       <div className="mt-2">
         <p className="text-xs font-[620] text-muted-text mb-1.5">
-          参考文档（{list.length}）
+          参考文档{list.length > 0 ? `（${list.length}）` : "：暂无"}
         </p>
-        <div className="space-y-1.5">
-          {list.map((f) => (
-            <div
-              key={f.name}
-              className="flex items-center gap-2 rounded-lg px-3 py-1.5 bg-white/60 border border-line"
-            >
-              <FileText className="w-3.5 h-3.5 text-muted-text flex-none" />
-              <span className="text-xs flex-1 min-w-0 truncate">{f.name}</span>
-              <span className="text-[10px] text-subtle flex-none">
-                {f.source === "local" ? "本地上传" : "知识库"}
-              </span>
-            </div>
-          ))}
-        </div>
+        {list.length > 0 && (
+          <div className="space-y-1.5">
+            {list.map((f) => (
+              <div
+                key={f.name}
+                className="flex items-center gap-2 rounded-lg px-3 py-1.5 bg-white/60 border border-line"
+              >
+                <FileText className="w-3.5 h-3.5 text-muted-text flex-none" />
+                <span className="text-xs flex-1 min-w-0 truncate">{f.name}</span>
+                <span className="text-[10px] text-subtle flex-none">
+                  {f.source === "local" ? "本地上传" : "知识库"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     )
   }

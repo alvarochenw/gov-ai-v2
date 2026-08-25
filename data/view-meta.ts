@@ -57,4 +57,8 @@ export const viewMeta: Record<string, ViewMeta> = {
     title: "模板库",
     subtitle: "管理和复用结构模板与风格模板",
   },
+  admin: {
+    title: "系统管理后台",
+    subtitle: "管理预设模板与系统配置",
+  },
 }

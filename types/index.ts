@@ -16,6 +16,7 @@ export type ViewName =
   | "tool-typeset"
   | "tool-polish"
   | "template-library"
+  | "admin"
 
 export type ModeName = "快速写作" | "模板写作" | "风格写作" | "以文写文"
 
@@ -92,6 +93,7 @@ export interface KnowledgeFile {
 export type { TemplateSection, WritingTemplate, SectionWritingMode } from "@/data/template"
 export type { StyleDimension, StyleTemplate, StyleSpec, DocumentType, Direction } from "@/data/style"
 export type { RefOverview, RefMaterial, WritingMode } from "@/data/ref"
+export type { SceneCategory, SceneSubItem } from "@/data/scenes"
 
 export interface ViewMeta {
   title: string

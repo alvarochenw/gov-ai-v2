@@ -5,9 +5,6 @@ import { ChevronUp, ChevronDown, Plus, CornerUpLeft, CornerDownRight, X } from "
 import { cn } from "@/lib/utils"
 import { parsePlaceholders } from "@/lib/placeholder"
 import type { TemplateSection, SectionWritingMode } from "@/data/template"
-import type { ReferenceFile } from "@/lib/template-data"
-import type { KnowledgeFile } from "@/types"
-import { ReferenceFilesEditor } from "@/components/reference-files-editor"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 
 export function validateSectionWordRange(section: TemplateSection): boolean {
@@ -38,7 +35,6 @@ export function SectionCard({
   onAddSubsection,
   onPromoteSection,
   onDemoteSection,
-  knowledgeFiles = [],
 }: {
   section: TemplateSection
   readOnly?: boolean
@@ -52,7 +48,6 @@ export function SectionCard({
   onAddSubsection?: (parentId: string) => void
   onPromoteSection?: (id: string) => void
   onDemoteSection?: (id: string) => void
-  knowledgeFiles?: KnowledgeFile[]
 }) {
   const fillRef = useRef<HTMLTextAreaElement>(null)
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -63,8 +58,6 @@ export function SectionCard({
   const setMode = (mode: SectionWritingMode) => {
     if (!readOnly) onUpdate(section.id, { writingMode: mode })
   }
-
-  const updateReferenceFiles = (files: ReferenceFile[]) => onUpdate(section.id, { referenceFiles: files })
 
   /** Insert {{}} at the textarea caret (or append), then place caret between the braces. */
   const insertPlaceholder = () => {
@@ -328,18 +321,6 @@ export function SectionCard({
         <span className="text-xs text-muted-text">字</span>
         {!wordRangeValid && <span className="text-xs text-accent-deep">最小不能大于最大</span>}
       </div>
-
-      {/* ---- Reference docs (level-1 only) ---- */}
-      {!isSub && (
-        <div className="mt-2 ml-[52px]">
-          <ReferenceFilesEditor
-            files={section.referenceFiles ?? []}
-            readOnly={readOnly}
-            onChange={updateReferenceFiles}
-            knowledgeFiles={knowledgeFiles}
-          />
-        </div>
-      )}
 
       {/* ---- Add subsection (level-1 only) ---- */}
       {!isSub && !readOnly && onAddSubsection && (

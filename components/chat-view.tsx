@@ -9,7 +9,9 @@ import { useWorkflowChat } from "@/hooks/use-workflow-chat"
 import { ChatMessage } from "@/components/chat-message"
 import { ChatInput } from "@/components/chat-input"
 import { consumePendingChatPrompt } from "@/lib/pending-prompt"
+import { consumeTemplateWritingInput } from "@/lib/template-data"
 import { experts } from "@/data/experts"
+import { TemplateWritingChat } from "@/components/template-writing-chat"
 import type { ChatMessage as ChatMessageType, ChatSession } from "@/types"
 
 // ─── Mock step data (kept for non-公文专家 modes) ────────────────
@@ -102,7 +104,25 @@ const demoDocument = `关于开展政务数据安全专项检查的通知
 
 // ─── Component ────────────────────────────────────────────────────
 
+/**
+ * Thin shell: consumes the template-writing input once (lazy useState) and
+ * routes to the dedicated template track, otherwise renders the standard
+ * agent / workflow / mock chat. Keeping the early return here (before any
+ * hooks in ChatView itself) avoids violating rules-of-hooks in the inner
+ * component, whose hooks must run unconditionally on every render.
+ */
 export function ChatView() {
+  const { chatMode } = useAppState()
+  const [templateInput] = useState(() =>
+    chatMode === "模板写作" ? consumeTemplateWritingInput() : null,
+  )
+  if (templateInput) {
+    return <TemplateWritingChat input={templateInput} />
+  }
+  return <ChatViewInner />
+}
+
+function ChatViewInner() {
   const state = useAppState()
   const dispatch = useAppDispatch()
   const { messages, chatMode, expert, activeSessionId } = state
