@@ -20,7 +20,6 @@ interface StyleLibraryCardProps {
 }
 
 const sourceLabel: Record<string, string> = {
-  file: "文件提取",
   custom: "自定义",
 }
 

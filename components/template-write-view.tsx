@@ -357,7 +357,7 @@ function SelectedTemplateSummary({
                 isPreset ? "bg-primary/10 text-primary" : "bg-accent-soft text-accent-deep"
               )}
             >
-              {isPreset ? "预设" : template.source === "file" ? "文件提取" : "自定义"}
+              {isPreset ? "预设" : "自定义"}
             </span>
           </div>
           <p className="text-xs text-muted-text mt-0.5">

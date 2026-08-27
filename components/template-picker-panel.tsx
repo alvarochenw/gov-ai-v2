@@ -205,7 +205,7 @@ function SelectedTemplateSummary({
               "text-[9px] font-[660] px-1.5 py-0.5 rounded flex-none",
               isPreset ? "bg-primary/10 text-primary" : "bg-accent-soft text-accent-deep"
             )}>
-              {isPreset ? "预设" : template.source === "file" ? "文件提取" : "自定义"}
+              {isPreset ? "预设" : "自定义"}
             </span>
             {adjusted && (
               <span className="text-[9px] font-[660] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 flex-none">已微调</span>

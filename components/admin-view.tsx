@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react"
 import {
   ArrowLeft, LayoutGrid, Palette, Pencil, Shield, FileStack,
-  Plus, Upload, Copy, Trash2, Loader2, X, AlertCircle,
+  Plus, Upload, Copy, Trash2, Loader2, X, AlertCircle, Lock,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppDispatch, useAppState } from "@/hooks/use-app-state"
@@ -32,6 +32,7 @@ import {
 import { StructureEditPanel, StyleEditPanel } from "@/components/template-library-view"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { ExtractTemplateDialog } from "@/components/extract-template-dialog"
+import { PermissionDialog } from "@/components/permission-dialog"
 import {
   Dialog, DialogClose, DialogContent, DialogHeader,
   DialogTitle, DialogDescription, DialogFooter,
@@ -39,22 +40,20 @@ import {
 import { Button } from "@/components/ui/button"
 
 type AdminTab = "structure" | "style"
-type SourceFilter = "all" | "preset" | "custom" | "file"
+type SourceFilter = "all" | "preset" | "custom"
 
 const uid = () => crypto.randomUUID()
 
-/** Classify a template id/source into a display source label. */
-function sourceLabelOf(t: { id: string; source: string }): "预设" | "自定义" | "文件提取" {
+/** Classify a template id/source into a display source label. 文件提取归入「自定义」,其来源通过模板标题体现。 */
+function sourceLabelOf(t: { id: string; source: string }): "预设" | "自定义" {
   if (t.id.startsWith("preset-")) return "预设"
-  if (t.source === "file") return "文件提取"
   return "自定义"
 }
 
 function matchesSource(t: { id: string; source: string }, f: SourceFilter): boolean {
   if (f === "all") return true
   if (f === "preset") return t.id.startsWith("preset-")
-  if (f === "file") return t.source === "file"
-  return !t.id.startsWith("preset-") && t.source !== "file"
+  return !t.id.startsWith("preset-")
 }
 
 export function AdminShell() {
@@ -74,6 +73,9 @@ export function AdminShell() {
   const [structSaveAsOpen, setStructSaveAsOpen] = useState(false)
   const [structSaveAsName, setStructSaveAsName] = useState("")
   const [notice, setNotice] = useState<{ text: string; ok: boolean } | null>(null)
+
+  /* ── 权限设置目标(结构/风格共用一个弹窗) ── */
+  const [permissionTarget, setPermissionTarget] = useState<{ id: string; name: string } | null>(null)
 
   /* ── 风格模板 ── */
   const [styleTemplates, setStyleTemplates] = useState<StyleTemplate[]>(() => loadSavedStyleTemplates())
@@ -470,6 +472,7 @@ export function AdminShell() {
                 onEdit={(t) => setStructEditing({ ...t, sections: t.sections.map((s) => ({ ...s })) })}
                 onCopy={handleStructCopy}
                 onDelete={setStructDeleteTarget}
+                onPermission={(t) => setPermissionTarget({ id: t.id, name: t.name })}
               />
             )
           ) : (
@@ -510,6 +513,7 @@ export function AdminShell() {
                 onEdit={(t) => setStyleEditing({ ...t })}
                 onCopy={handleStyleCopy}
                 onDelete={setStyleDeleteTarget}
+                onPermission={(t) => setPermissionTarget({ id: t.id, name: t.name })}
               />
             )
           )}
@@ -576,6 +580,14 @@ export function AdminShell() {
         onOpenChange={setStyleSaveAsOpen}
         onConfirm={handleStyleSaveAsNewConfirm}
       />
+
+      {/* 设置智能体权限 */}
+      <PermissionDialog
+        open={permissionTarget !== null}
+        templateId={permissionTarget?.id ?? ""}
+        templateName={permissionTarget?.name ?? ""}
+        onOpenChange={(open) => { if (!open) setPermissionTarget(null) }}
+      />
     </div>
   )
 }
@@ -587,7 +599,7 @@ export function AdminShell() {
 function AdminBrowsePanel<T extends { id: string; name: string; source: string; updatedAt: string }>({
   kind, templates, totalCount, search, onSearch, source, onSource,
   isExtracting, extractError, onDismissError, onOpenExtract, onCreateBlank,
-  onEdit, onCopy, onDelete,
+  onEdit, onCopy, onDelete, onPermission,
 }: {
   kind: "structure" | "style"
   templates: T[]
@@ -604,6 +616,7 @@ function AdminBrowsePanel<T extends { id: string; name: string; source: string; 
   onEdit: (t: T) => void
   onCopy: (t: T) => void
   onDelete: (t: T) => void
+  onPermission: (t: T) => void
 }) {
   return (
     <div>
@@ -643,7 +656,6 @@ function AdminBrowsePanel<T extends { id: string; name: string; source: string; 
           <option value="all">全部来源</option>
           <option value="preset">预设</option>
           <option value="custom">自定义</option>
-          <option value="file">文件提取</option>
         </select>
         <input
           type="search"
@@ -697,29 +709,42 @@ function AdminBrowsePanel<T extends { id: string; name: string; source: string; 
                 <p className="text-[11px] text-subtle mb-4">
                   更新于 {formatDate(t.updatedAt)}
                 </p>
-                <div className="mt-auto flex items-center gap-2">
+                <div className="mt-auto grid grid-cols-4 gap-2">
                   <button
                     type="button"
                     onClick={() => onEdit(t)}
-                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-sm font-[620] border border-accent-deep/30 bg-accent-soft/50 text-accent-deep hover:bg-accent-soft cursor-pointer transition-[background] duration-150"
+                    title="编辑"
+                    aria-label="编辑"
+                    className="h-9 grid place-items-center rounded-xl border border-transparent bg-gradient-to-r from-[#d85061] to-[#aa2639] text-white hover:from-[#c23b4d] hover:to-[#981f32] cursor-pointer shadow-[0_6px_14px_rgba(170,38,57,0.14)] transition-[background] duration-150"
                   >
-                    <Pencil className="w-3.5 h-3.5" /> 编辑
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onPermission(t)}
+                    title="设置权限"
+                    aria-label="设置权限"
+                    className="h-9 grid place-items-center rounded-xl border border-line bg-white/60 text-muted-text hover:text-accent-deep hover:border-[rgba(200,60,78,0.24)] hover:bg-accent-soft/40 cursor-pointer transition-[background,color,border-color] duration-150"
+                  >
+                    <Lock className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
                     onClick={() => onCopy(t)}
                     title="复制副本"
-                    className="inline-flex items-center justify-center px-2.5 py-2 rounded-xl text-sm font-[620] border border-line bg-white/60 text-muted-text hover:text-foreground hover:bg-white/80 cursor-pointer transition-[background,color] duration-150"
+                    aria-label="复制副本"
+                    className="h-9 grid place-items-center rounded-xl border border-line bg-white/60 text-muted-text hover:text-foreground hover:bg-white/80 cursor-pointer transition-[background,color] duration-150"
                   >
-                    <Copy className="w-3.5 h-3.5" />
+                    <Copy className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
                     onClick={() => onDelete(t)}
                     title="删除"
-                    className="inline-flex items-center justify-center px-2.5 py-2 rounded-xl text-sm font-[620] border border-transparent bg-transparent text-muted-text hover:text-accent-deep hover:bg-accent-faint cursor-pointer transition-[background,color] duration-150"
+                    aria-label="删除"
+                    className="h-9 grid place-items-center rounded-xl border border-transparent bg-transparent text-muted-text hover:text-accent-deep hover:bg-accent-faint cursor-pointer transition-[background,color] duration-150"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
               </div>
