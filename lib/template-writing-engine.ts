@@ -75,6 +75,9 @@ export async function generateSection(
   await new Promise((resolve) => setTimeout(resolve, 700 + Math.random() * 400))
 
   const base =
+    // fill 模式:仅替换 {{占位符}},固定文本不可改;全局提示词(additionalNotes)不参与
+    // fill 章节的文本生成——用户只能通过占位符值影响 fill 章节。本次快速写作向导
+    // 不收集占位符值,故未填占位符输出【待补:字段名】。见 docs/模板库AI功能实现逻辑.md §7.2/§7.8。
     section.writingMode === "fill"
       ? applyPlaceholders(section.fillTemplate, ctx.placeholderValues)
       : buildPromptMock(section, ctx)
@@ -83,13 +86,51 @@ export async function generateSection(
   return constrainWordCount(base, section.wordCountMin, section.wordCountMax)
 }
 
-/** MOCK: synthesize paragraph text from a generationHint prompt. */
+/**
+ * Build a structured, layered generation instruction for one section (prompt mode).
+ *
+ * Two layers that do not exclude each other:
+ *   1. 结构意图 — from the template's generationHint (what this section covers)
+ *   2. 用户附加要求 — from the global additionalNotes (per-task 口径/重点/约束)
+ *
+ * Conflict rule: the user layer wins. docs/模板库AI功能实现逻辑.md §7.2 ranks
+ * "user explicit input" above "structure template generationHint"; the prompt
+ * states this explicitly so a future real LLM honors the priority.
+ *
+ * (Mock stage: buildPromptMock below derives placeholder text from the same
+ * inputs; a real LLM would consume this structured prompt directly.)
+ */
+function buildSectionPrompt(section: TemplateSection, ctx: GenerationContext): string {
+  const hint = section.generationHint || section.title || "展开本节内容"
+  const lines: string[] = [`生成章节：${section.title}`, `本章结构意图（模板定义）：${hint}`]
+  const notes = ctx.additionalNotes.trim()
+  if (notes) {
+    lines.push(`用户附加要求（优先级高于结构意图,如有冲突以用户要求为准）：${notes}`)
+  }
+  if (ctx.documentTitle.trim()) lines.push(`文稿标题：${ctx.documentTitle}`)
+  if (ctx.draftingUnit.trim()) lines.push(`拟稿单位：${ctx.draftingUnit}`)
+  const range = wordRangeLabel(section.wordCountMin, section.wordCountMax)
+  if (range) lines.push(`篇幅要求：${range}`)
+  lines.push("只返回章节正文,不返回标题和解释。")
+  return lines.join("\n")
+}
+
+/** Expose the layered instruction so future real-LLM adapters can consume it
+ *  without re-deriving the structure-vs-user priority rules. */
+export function getSectionPrompt(section: TemplateSection, ctx: GenerationContext): string {
+  return buildSectionPrompt(section, ctx)
+}
+
+/** MOCK: synthesize paragraph text from a generationHint prompt.
+ *  Keeps the full additionalNotes (not truncated) so the user's per-task
+ *  requirements are visible in the mock output. A real LLM would consume
+ *  buildSectionPrompt directly instead of this mock body. */
 function buildPromptMock(section: TemplateSection, ctx: GenerationContext): string {
   const hint = section.generationHint || section.title || "展开本节内容"
   const title = ctx.documentTitle || "本次公文"
   const unit = ctx.draftingUnit || "本单位"
-  const notes = ctx.additionalNotes
-    ? `结合要求"${ctx.additionalNotes.slice(0, 40)}"`
+  const notes = ctx.additionalNotes.trim()
+    ? `结合要求"${ctx.additionalNotes}"`
     : "结合工作实际"
 
   const lead = `${section.title}。`

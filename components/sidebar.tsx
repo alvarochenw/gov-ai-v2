@@ -19,7 +19,7 @@ import { useAppState, useAppDispatch } from "@/hooks/use-app-state"
 
 const subNavItems: { view: string; label: string }[] = [
   { view: "write-quick", label: "快速写作" },
-  // [HIDDEN] { view: "write-template", label: "模板写作" },
+  { view: "write-template", label: "模板写作" },
   // [HIDDEN] { view: "write-style", label: "风格写作" },
   { view: "write-ref", label: "以文写文" },
 ]
@@ -39,6 +39,8 @@ export function Sidebar() {
   const [adminMenuStyle, setAdminMenuStyle] = useState<React.CSSProperties>({})
   const avatarRef = useRef<HTMLButtonElement>(null)
   const adminMenuRef = useRef<HTMLDivElement>(null)
+  const navRef = useRef<HTMLElement>(null)
+  const [scrollEdges, setScrollEdges] = useState({ top: false, bottom: false })
 
   const { view, sidebarCollapsed, mobileMenuOpen } = state
 
@@ -84,6 +86,28 @@ export function Sidebar() {
       window.removeEventListener("resize", closeAdminMenu)
     }
   }, [adminMenuOpen])
+
+  // 动态渐隐遮罩：只在还能往该方向滚动时显示边缘渐隐，暗示可滚动方向
+  useEffect(() => {
+    const el = navRef.current
+    if (!el) return
+    const update = () => {
+      const { scrollTop, scrollHeight, clientHeight } = el
+      setScrollEdges({
+        top: scrollTop > 4,
+        bottom: scrollTop + clientHeight < scrollHeight - 4,
+      })
+    }
+    update()
+    el.addEventListener("scroll", update, { passive: true })
+    // 子菜单展开/折叠改变内容高度，用 ResizeObserver 重新判断
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener("scroll", update)
+      ro.disconnect()
+    }
+  }, [])
 
   // Check if any write sub-view is active
   const isWriteActive = view.startsWith("write-")
@@ -172,8 +196,19 @@ export function Sidebar() {
         </span>
       </div>
 
-      {/* Navigation */}
-      <nav className="grid gap-1.5 overflow-hidden">
+      {/* Navigation — 可滚动：滚动条完全隐藏，用动态渐隐遮罩暗示可滚动方向，用户区常驻底部 */}
+      <nav
+        ref={navRef}
+        style={{
+          maskImage: `linear-gradient(to bottom, ${scrollEdges.top ? "transparent" : "black"} 0, black 14px, black calc(100% - 14px), ${scrollEdges.bottom ? "transparent" : "black"} 100%)`,
+          WebkitMaskImage: `linear-gradient(to bottom, ${scrollEdges.top ? "transparent" : "black"} 0, black 14px, black calc(100% - 14px), ${scrollEdges.bottom ? "transparent" : "black"} 100%)`,
+        }}
+        className={cn(
+          "grid gap-1.5 flex-1 min-h-0 content-start",
+          "overflow-y-auto overscroll-contain",
+          "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        )}
+      >
         {/* 新建任务 */}
         <button
           type="button"
@@ -182,7 +217,7 @@ export function Sidebar() {
           className={cn(
             "w-full border-0 cursor-pointer text-left text-inherit",
             "flex items-center transition-[background,color,transform,box-shadow] duration-150",
-            "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+            "h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
             view === "home"
               ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
               : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
@@ -217,7 +252,7 @@ export function Sidebar() {
           className={cn(
             "w-full border-0 cursor-pointer text-left text-inherit",
             "flex items-center transition-[background,color,transform,box-shadow] duration-150",
-            "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+            "h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
             isSessionsActive
               ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
               : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
@@ -255,7 +290,7 @@ export function Sidebar() {
             className={cn(
               "w-full border-0 cursor-pointer text-left text-inherit",
               "flex items-center transition-[background,color,transform,box-shadow] duration-150",
-              "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+              "h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
               isWriteActive
                 ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
                 : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
@@ -306,7 +341,7 @@ export function Sidebar() {
                 type="button"
                 onClick={() => handleNavClick(item.view)}
                 className={cn(
-                  "flex items-center min-h-[34px] px-[11px] py-[7px] rounded-[10px]",
+                  "flex items-center h-[34px] px-[11px] py-[7px] rounded-[10px]",
                   "bg-transparent text-muted-text text-[13px] border-0 cursor-pointer text-left",
                   "transition-[background,color] duration-150 hover:bg-white/64",
                   isSubNavActive(item.view) &&
@@ -338,7 +373,7 @@ export function Sidebar() {
             className={cn(
               "w-full border-0 cursor-pointer text-left text-inherit",
               "flex items-center transition-[background,color,transform,box-shadow] duration-150",
-              "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+              "h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
               isToolsActive
                 ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
                 : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
@@ -389,7 +424,7 @@ export function Sidebar() {
                 type="button"
                 onClick={() => handleNavClick(item.view)}
                 className={cn(
-                  "flex items-center min-h-[34px] px-[11px] py-[7px] rounded-[10px]",
+                  "flex items-center h-[34px] px-[11px] py-[7px] rounded-[10px]",
                   "bg-transparent text-muted-text text-[13px] border-0 cursor-pointer text-left",
                   "transition-[background,color] duration-150 hover:bg-white/64",
                   view === item.view &&
@@ -418,7 +453,7 @@ export function Sidebar() {
           className={cn(
             "w-full border-0 cursor-pointer text-left text-inherit",
             "flex items-center transition-[background,color,transform,box-shadow] duration-150",
-            "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+            "h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
             view === "template-library"
               ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
               : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
@@ -453,7 +488,7 @@ export function Sidebar() {
           className={cn(
             "w-full border-0 cursor-pointer text-left text-inherit",
             "flex items-center transition-[background,color,transform,box-shadow] duration-150",
-            "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+            "h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
             view === "knowledge"
               ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
               : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"
@@ -488,7 +523,7 @@ export function Sidebar() {
           className={cn(
             "w-full border-0 cursor-pointer text-left text-inherit",
             "flex items-center transition-[background,color,transform,box-shadow] duration-150",
-            "min-h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
+            "h-12 gap-[11px] rounded-[14px] px-[10px] py-[7px] font-[660] overflow-hidden",
             view === "experts"
               ? "bg-white/92 text-accent-deep shadow-[0_8px_24px_rgba(74,49,60,0.06)]"
               : "bg-transparent hover:bg-white/64 active:translate-y-[1px]"

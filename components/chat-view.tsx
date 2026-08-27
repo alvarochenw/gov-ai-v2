@@ -9,9 +9,9 @@ import { useWorkflowChat } from "@/hooks/use-workflow-chat"
 import { ChatMessage } from "@/components/chat-message"
 import { ChatInput } from "@/components/chat-input"
 import { consumePendingChatPrompt } from "@/lib/pending-prompt"
-import { consumeTemplateWritingInput } from "@/lib/template-data"
+import { consumeQuickWriteInput } from "@/lib/quick-write-data"
 import { experts } from "@/data/experts"
-import { TemplateWritingChat } from "@/components/template-writing-chat"
+import { QuickWriteGenerationChat } from "@/components/quick-write-generation-chat"
 import type { ChatMessage as ChatMessageType, ChatSession } from "@/types"
 
 // ─── Mock step data (kept for non-公文专家 modes) ────────────────
@@ -113,11 +113,11 @@ const demoDocument = `关于开展政务数据安全专项检查的通知
  */
 export function ChatView() {
   const { chatMode } = useAppState()
-  const [templateInput] = useState(() =>
-    chatMode === "模板写作" ? consumeTemplateWritingInput() : null,
+  const [quickWriteInput] = useState(() =>
+    chatMode === "快速写作" ? consumeQuickWriteInput() : null,
   )
-  if (templateInput) {
-    return <TemplateWritingChat input={templateInput} />
+  if (quickWriteInput) {
+    return <QuickWriteGenerationChat input={quickWriteInput} />
   }
   return <ChatViewInner />
 }

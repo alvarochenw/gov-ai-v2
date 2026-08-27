@@ -1,14 +1,14 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { Clock, ArrowRight, ArrowLeft, FileText, ListTree, PenLine, Layers, LayoutGrid } from "lucide-react"
+import { useState, useMemo } from "react"
+import { Clock, ArrowRight, ArrowLeft, FileText, ListTree, PenLine } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAppDispatch } from "@/hooks/use-app-state"
 import { modeCopy } from "@/data/modes"
 import { WriteModeCard, type WriteModeId } from "@/components/write-mode-card"
 import { ScenePicker } from "@/components/scene-picker"
-import { TemplatePickerPanel } from "@/components/template-picker-panel"
-import type { WritingTemplate, TemplateSection } from "@/data/template"
+import { StyleSelect } from "@/components/style-select"
+import { loadSavedStyleTemplates, type StyleTemplate } from "@/data/style"
 import type { SceneSubItem } from "@/data/scenes"
 
 /* ── 写作模式定义 ── */
@@ -21,8 +21,6 @@ const WRITE_MODES: { id: WriteModeId; name: string; description: string; icon: t
 /* ── 步骤定义 ── */
 const STEPS = ["选择模式", "选择内容", "填写信息", "生成文稿"]
 
-type ContentTab = "scene" | "template"
-
 export function QuickWriteView() {
   const dispatch = useAppDispatch()
   const copy = modeCopy["快速写作"]
@@ -30,12 +28,19 @@ export function QuickWriteView() {
   const [step, setStep] = useState(0)
   const [selectedMode, setSelectedMode] = useState<WriteModeId | null>(null)
 
-  // step1:选择内容(仅生成全文分支)
-  const [activeTab, setActiveTab] = useState<ContentTab>("scene")
+  // step1:选择内容(仅生成全文分支,只保留选择场景)
   const [selectedScene, setSelectedScene] = useState<SceneSubItem | null>(null)
-  const [selectedTplInfo, setSelectedTplInfo] = useState<{ template: WritingTemplate; sections: TemplateSection[] } | null>(null)
 
-  /** 进入聊天视图(后续步骤完成后调用,当前留作复用)。 */
+  // step2:填写信息(标题/拟稿单位/全局提示词;不收集占位符值)
+  const [documentTitle, setDocumentTitle] = useState("")
+  const [draftingUnit, setDraftingUnit] = useState("")
+  const [additionalNotes, setAdditionalNotes] = useState("")
+  const [selectedStyleId, setSelectedStyleId] = useState("")
+
+  // 风格模板列表(含后台自定义),挂载时读一次
+  const styleTemplates = useMemo(() => loadSavedStyleTemplates(), [])
+
+  /** 进入聊天视图:场景分支走旧 mock 流程。 */
   const handleStart = () => {
     dispatch({ type: "SET_CHAT_MODE", mode: "快速写作" })
     dispatch({ type: "CLEAR_CHAT" })
@@ -43,26 +48,15 @@ export function QuickWriteView() {
   }
 
   /** step1 是否可进入下一步。 */
-  const canAdvanceStep1 =
-    selectedMode === "full" &&
-    (activeTab === "scene" ? !!selectedScene : !!selectedTplInfo)
+  const canAdvanceStep1 = selectedMode === "full" && !!selectedScene
 
   /** step1 已选项的展示文案。 */
   const step1SelectedLabel =
-    selectedMode !== "full" ? ""
-    : activeTab === "scene"
-      ? selectedScene ? `已选场景：${selectedScene.name}（${selectedScene.documentType}）` : "请选择一个场景"
-      : selectedTplInfo ? `已选模板：${selectedTplInfo.template.name}` : "请选择一个模板"
-
-  /** 切 tab 时清掉另一 tab 的已选,避免误用。 */
-  const switchTab = useCallback((tab: ContentTab) => {
-    setActiveTab(tab)
-  }, [])
-
-  /** 模板面板选定后同步(由 panel 内 useEffect 调用)。 */
-  const handleTplConfirm = useCallback((template: WritingTemplate, sections: TemplateSection[]) => {
-    setSelectedTplInfo({ template, sections })
-  }, [])
+    selectedMode !== "full"
+      ? ""
+      : selectedScene
+        ? `已选场景：${selectedScene.name}（${selectedScene.documentType}）`
+        : "请选择一个场景"
 
   return (
     <div className="w-[min(960px,100%)] mx-auto">
@@ -125,34 +119,7 @@ export function QuickWriteView() {
         <div className="mt-6">
           {selectedMode === "full" ? (
             <>
-              {/* 顶部 tab:选择场景 / 选择模板 */}
-              <div className="flex gap-2 mb-5">
-                {([
-                  { key: "scene" as ContentTab, label: "选择场景", icon: Layers },
-                  { key: "template" as ContentTab, label: "选择模板", icon: LayoutGrid },
-                ]).map((tab) => (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => switchTab(tab.key)}
-                    className={cn(
-                      "inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-[620] cursor-pointer border transition-[background,color,border-color] duration-150",
-                      activeTab === tab.key
-                        ? "bg-accent-soft text-accent-deep border-[rgba(200,60,78,0.24)]"
-                        : "bg-transparent text-muted-text border-transparent hover:bg-white/60"
-                    )}
-                  >
-                    <tab.icon className="w-4 h-4" />
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              {activeTab === "scene" ? (
-                <ScenePicker selected={selectedScene} onSelect={setSelectedScene} />
-              ) : (
-                <TemplatePickerPanel onConfirm={handleTplConfirm} />
-              )}
+              <ScenePicker selected={selectedScene} onSelect={setSelectedScene} />
 
               <StepFooter
                 hint={step1SelectedLabel}
@@ -170,14 +137,42 @@ export function QuickWriteView() {
             />
           )}
         </div>
-      ) : (
-        /* step 2/3:占位 */
+      ) : step === 2 ? (
+        /* step 2:填写信息(仅生成全文 + 已选场景/模板时填实,否则占位) */
         <div className="mt-6">
-          <PlaceholderStep
-            label={STEPS[step]}
-            extra={`已选写作模式：${WRITE_MODES.find((m) => m.id === selectedMode)?.name ?? "未选择"}`}
-            onBack={() => setStep(step - 1)}
-            isLast={step === STEPS.length - 1}
+          {selectedMode === "full" && selectedScene ? (
+            <BasicInfoStep
+              documentTitle={documentTitle}
+              draftingUnit={draftingUnit}
+              additionalNotes={additionalNotes}
+              selectedStyleId={selectedStyleId}
+              styleTemplates={styleTemplates}
+              onTitle={setDocumentTitle}
+              onUnit={setDraftingUnit}
+              onNotes={setAdditionalNotes}
+              onStyle={setSelectedStyleId}
+              onBack={() => setStep(1)}
+              onNext={() => setStep(3)}
+            />
+          ) : (
+            <PlaceholderStep
+              label={STEPS[step]}
+              extra={`已选写作模式：${WRITE_MODES.find((m) => m.id === selectedMode)?.name ?? "未选择"}`}
+              onBack={() => setStep(1)}
+            />
+          )}
+        </div>
+      ) : (
+        /* step 3:确认摘要并开始 */
+        <div className="mt-6">
+          <ConfirmStep
+            selectedMode={selectedMode}
+            sceneName={selectedScene?.name}
+            styleName={styleTemplates.find((t) => t.id === selectedStyleId)?.name}
+            documentTitle={documentTitle}
+            draftingUnit={draftingUnit}
+            additionalNotes={additionalNotes}
+            onBack={() => setStep(2)}
             onStart={handleStart}
           />
         </div>
@@ -304,6 +299,152 @@ function PlaceholderStep({
         )}
       </div>
     </>
+  )
+}
+
+/* ── 填写写作基础信息(step2) ── */
+function BasicInfoStep({
+  documentTitle, draftingUnit, additionalNotes,
+  selectedStyleId, styleTemplates,
+  onTitle, onUnit, onNotes, onStyle, onBack, onNext,
+}: {
+  documentTitle: string
+  draftingUnit: string
+  additionalNotes: string
+  selectedStyleId: string
+  styleTemplates: StyleTemplate[]
+  onTitle: (v: string) => void
+  onUnit: (v: string) => void
+  onNotes: (v: string) => void
+  onStyle: (v: string) => void
+  onBack: () => void
+  onNext: () => void
+}) {
+  const canNext = documentTitle.trim().length > 0 && additionalNotes.trim().length > 0
+  return (
+    <>
+      <div className="bg-white/80 border border-line rounded-2xl p-6">
+        <h3 className="text-sm font-[660] mb-4">填写写作基础信息</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+          <div>
+            <label className="block text-xs font-[620] text-muted-text mb-1.5">
+              公文标题<span className="text-accent-deep ml-0.5" aria-hidden>*</span>
+            </label>
+            <input
+              type="text"
+              value={documentTitle}
+              onChange={(e) => onTitle(e.target.value)}
+              placeholder="如：关于XXX的通知"
+              className={cn(
+                "w-full h-9 px-4 border border-line rounded-4xl text-sm",
+                "bg-white/60 text-foreground placeholder:text-subtle",
+                "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
+                "transition-[border-color,box-shadow] duration-150",
+              )}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-[620] text-muted-text mb-1.5">拟稿单位</label>
+            <input
+              type="text"
+              value={draftingUnit}
+              onChange={(e) => onUnit(e.target.value)}
+              placeholder="如：办公室"
+              className={cn(
+                "w-full h-9 px-4 border border-line rounded-4xl text-sm",
+                "bg-white/60 text-foreground placeholder:text-subtle",
+                "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
+                "transition-[border-color,box-shadow] duration-150",
+              )}
+            />
+          </div>
+        </div>
+        <div className="mb-4">
+          <label className="block text-xs font-[620] text-muted-text mb-1.5">风格模板</label>
+          <StyleSelect
+            value={selectedStyleId}
+            options={styleTemplates}
+            onChange={onStyle}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-[620] text-muted-text mb-1.5">
+            写作要求（全局提示词）<span className="text-accent-deep ml-0.5" aria-hidden>*</span>
+          </label>
+          <textarea
+            value={additionalNotes}
+            onChange={(e) => onNotes(e.target.value)}
+            placeholder="描述本次写作的具体要求,如重点内容、口径、注意事项..."
+            className={cn(
+              "w-full min-h-[100px] border border-line rounded-xl p-4 text-sm leading-relaxed resize-y",
+              "bg-white/60 text-foreground placeholder:text-subtle",
+              "focus:outline-none focus:border-[rgba(200,60,78,0.36)] focus:ring-2 focus:ring-[rgba(200,60,78,0.08)]",
+              "transition-[border-color,box-shadow] duration-150",
+            )}
+          />
+        </div>
+      </div>
+      <StepFooter hint="标题和写作要求为必填项" canNext={canNext} onNext={onNext} onBack={onBack} />
+    </>
+  )
+}
+
+/* ── 确认摘要并开始(step3) ── */
+function ConfirmStep({
+  selectedMode, sceneName, styleName,
+  documentTitle, draftingUnit, additionalNotes, onBack, onStart,
+}: {
+  selectedMode: WriteModeId | null
+  sceneName?: string
+  styleName?: string
+  documentTitle: string
+  draftingUnit: string
+  additionalNotes: string
+  onBack: () => void
+  onStart: () => void
+}) {
+  const modeLabel = WRITE_MODES.find((m) => m.id === selectedMode)?.name ?? "未选择"
+  return (
+    <>
+      <div className="bg-white/80 border border-line rounded-2xl p-6">
+        <h3 className="text-sm font-[660] mb-4">确认写作信息</h3>
+        <dl className="space-y-3 text-sm">
+          <SummaryRow label="写作模式" value={modeLabel} />
+          <SummaryRow label="已选场景" value={sceneName ?? "未选择"} />
+          <SummaryRow label="风格模板" value={styleName || "不指定"} />
+          <SummaryRow label="公文标题" value={documentTitle || "未填写"} />
+          <SummaryRow label="拟稿单位" value={draftingUnit || "未填写"} />
+          <SummaryRow label="写作要求" value={additionalNotes || "未填写"} multiline />
+        </dl>
+      </div>
+      <div className="flex items-center gap-3 mt-6">
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-[620] border border-line bg-white/60 text-muted-text hover:text-accent-deep hover:bg-white/80 cursor-pointer transition-[background,color] duration-150"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          返回上一步
+        </button>
+        <button
+          type="button"
+          onClick={onStart}
+          className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-[660] text-white bg-gradient-to-r from-[#cf4657] to-[#aa2639] hover:from-[#c23b4d] hover:to-[#981f32] border border-accent-deep cursor-pointer transition-[background] duration-150"
+        >
+          开始快速写作
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      </div>
+    </>
+  )
+}
+
+function SummaryRow({ label, value, multiline }: { label: string; value: string; multiline?: boolean }) {
+  return (
+    <div className={cn("flex gap-3", multiline ? "flex-col" : "items-start")}>
+      <dt className="text-xs font-[620] text-muted-text flex-none w-20">{label}</dt>
+      <dd className={cn("text-foreground", multiline ? "text-sm leading-relaxed whitespace-pre-wrap break-words" : "text-sm")}>{value}</dd>
+    </div>
   )
 }
 
